@@ -254,7 +254,7 @@ func TestClientHasSPLToken(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(tt.serverStatus)
 				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(tt.serverResponse))
+				_, _ = w.Write([]byte(tt.serverResponse))
 			}))
 			defer server.Close()
 
@@ -315,7 +315,7 @@ func TestClientHasSPLTokenRequestFormat(t *testing.T) {
 		// Send success response
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"jsonrpc": "2.0", "id": 1, "result": {"value": []}}`))
+		_, _ = w.Write([]byte(`{"jsonrpc": "2.0", "id": 1, "result": {"value": []}}`))
 	}))
 	defer server.Close()
 
@@ -333,7 +333,7 @@ func TestClientHasSPLTokenContextCancellation(t *testing.T) {
 		// Slow response to test context cancellation
 		time.Sleep(100 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"jsonrpc": "2.0", "id": 1, "result": {"value": []}}`))
+		_, _ = w.Write([]byte(`{"jsonrpc": "2.0", "id": 1, "result": {"value": []}}`))
 	}))
 	defer server.Close()
 

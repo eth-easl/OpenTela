@@ -220,7 +220,9 @@ func GlobalServiceForwardHandler(c *gin.Context) {
 	proxy.Transport = tr
 	proxy.ErrorHandler = ErrorHandler
 	proxy.ModifyResponse = func(r *http.Response) error {
-		rewriteHeader()(r)
+		if err := rewriteHeader()(r); err != nil {
+			return err
+		}
 		r.Header.Set("X-Computing-Node", targetPeer)
 		return nil
 	}

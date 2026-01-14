@@ -174,10 +174,10 @@ func TestInitConfigFlagBinding(t *testing.T) {
 	cmd.Flags().StringSlice("test-slice", []string{"a", "b"}, "test slice flag")
 
 	// Simulate flag changes
-	cmd.Flags().Set("test-bool", "false")
-	cmd.Flags().Set("test-string", "custom")
-	cmd.Flags().Set("test-int", "100")
-	cmd.Flags().Set("test-slice", "x,y,z")
+	require.NoError(t, cmd.Flags().Set("test-bool", "false"))
+	require.NoError(t, cmd.Flags().Set("test-string", "custom"))
+	require.NoError(t, cmd.Flags().Set("test-int", "100"))
+	require.NoError(t, cmd.Flags().Set("test-slice", "x,y,z"))
 
 	err := initConfig(cmd)
 	require.NoError(t, err)
