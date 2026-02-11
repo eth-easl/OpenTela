@@ -11,7 +11,7 @@ func GetGPUInfo() []common.GPUSpec {
 	cmd := exec.Command("nvidia-smi", "--query-gpu=name,memory.total,memory.used", "--format=csv,noheader,nounits")
 	out, err := cmd.Output()
 	if err != nil {
-		common.Logger.Info("Error running nvidia-smi: ", err)
+		common.Logger.Info("Error running nvidia-smi: ", err, " - GPU info will be unavailable (this is expected if no NVIDIA GPU is present)")
 		return []common.GPUSpec{}
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")

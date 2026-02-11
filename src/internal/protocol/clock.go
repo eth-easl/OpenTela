@@ -71,7 +71,7 @@ func StartTicker() {
 			// exit myself
 			os.Exit(1)
 		}
-		common.Logger.Infof("Verification Summary: %d un-reachable peers, %d re-connected peers", disconnected, reconnected)
+		common.Logger.Debugf("Verification Summary: %d un-reachable peers, %d re-connected peers", disconnected, reconnected)
 	})
 	common.ReportError(err, "Error while creating verification ticker")
 

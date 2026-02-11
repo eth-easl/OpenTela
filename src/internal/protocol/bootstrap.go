@@ -17,7 +17,7 @@ var lookupTXT = net.LookupTXT
 func getDefaultBootstrapPeers(bootstrapAddrs []string, mode string) []multiaddr.Multiaddr {
 	if mode == "standalone" {
 		common.Logger.Info("Bootstrap: []")
-		return nil
+		return []multiaddr.Multiaddr{}
 	}
 
 	var sources []string
@@ -32,7 +32,7 @@ func getDefaultBootstrapPeers(bootstrapAddrs []string, mode string) []multiaddr.
 
 	if len(sources) == 0 {
 		common.Logger.Warn("No bootstrap sources configured")
-		return nil
+		return []multiaddr.Multiaddr{}
 	}
 
 	resolved := resolveBootstrapSources(sources)
