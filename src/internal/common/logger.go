@@ -9,15 +9,33 @@ import (
 var Logger *zap.SugaredLogger
 
 func init() {
+	InitLogger()
+}
+
+func InitLogger() {
 	config := zap.NewDevelopmentConfig()
-	if viper.Get("loglevel") != nil {
-		// if it is not set, by default will be 0 - info
-		config.Level.SetLevel(zapcore.Level(viper.GetInt("loglevel")))
+	var level zapcore.Level
+	if viper.IsSet("loglevel") {
+		err := level.UnmarshalText([]byte(viper.GetString("loglevel")))
+		if err == nil {
+			config.Level.SetLevel(level)
+		} else {
+			config.Level.SetLevel(zapcore.Level(viper.GetInt("loglevel")))
+		}
+	} else if viper.IsSet("log_level") {
+		err := level.UnmarshalText([]byte(viper.GetString("log_level")))
+		if err == nil {
+			config.Level.SetLevel(level)
+		} else {
+			config.Level.SetLevel(zapcore.Level(viper.GetInt("log_level")))
+		}
+	} else {
+		config.Level.SetLevel(zapcore.InfoLevel)
 	}
+	// fmt.Printf("Log level set to %s\n", config.Level.Level().String())
 	config.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
-	config.Level.SetLevel(zapcore.InfoLevel)
-    zapLogger, err := config.Build()
-    defer func() { _ = zapLogger.Sync() }()
+	zapLogger, err := config.Build()
+	// defer func() { _ = zapLogger.Sync() }()
 	if err != nil {
 		panic(err)
 	}

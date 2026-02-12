@@ -82,7 +82,7 @@ func StartTicker() {
 		// Also log current connection count for easy monitoring
 		connectedPeers := ConnectedPeers()
 		allPeers := AllPeers()
-		common.Logger.Infof("Connection Summary: %d connected peers, %d total known peers",
+		common.Logger.Debugf("Connection Summary: %d connected peers, %d total known peers",
 			len(connectedPeers), len(allPeers))
 
 		// Log if we have very few connections (potential issue)

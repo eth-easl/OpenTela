@@ -32,6 +32,7 @@ var rootcmd = &cobra.Command{
 
 //nolint:gochecknoinits
 func init() {
+
 	rootcmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/ocf/cfg.yaml)")
 
 	startCmd.Flags().String("wallet.account", "", "wallet account")
@@ -60,7 +61,9 @@ func init() {
 func initConfig(cmd *cobra.Command) error {
 	var home string
 	var err error
-
+	viper.SetEnvPrefix("of")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.AutomaticEnv()
 	viper.SetDefault("crdt.tombstone_retention", "24h")
 	viper.SetDefault("crdt.tombstone_compaction_interval", "1h")
 	viper.SetDefault("crdt.tombstone_compaction_batch", 512)
@@ -138,6 +141,7 @@ func initConfig(cmd *cobra.Command) error {
 			}
 		}
 	})
+	common.InitLogger()
 	return nil
 }
 
