@@ -62,6 +62,7 @@ func initConfig(cmd *cobra.Command) error {
 	var home string
 	var err error
 	viper.SetEnvPrefix("of")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 	viper.SetDefault("crdt.tombstone_retention", "24h")
 	viper.SetDefault("crdt.tombstone_compaction_interval", "1h")
