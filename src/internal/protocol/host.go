@@ -54,12 +54,12 @@ func GetP2PNode(ds datastore.Batching) (host.Host, dualdht.DHT) {
 			os.Exit(1)
 		}
 		host, err := newHost(ctx, seedInt, ds)
-		MyID = host.ID().String()
-		P2PNode = &host
 		if err != nil {
 			common.Logger.Error("Error while creating P2P node: ", err)
 			os.Exit(1)
 		}
+		MyID = host.ID().String()
+		P2PNode = &host
 	})
 	return *P2PNode, *ddht
 }
