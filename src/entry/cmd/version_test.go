@@ -17,7 +17,8 @@ func TestVersionCommandProperties(t *testing.T) {
 func TestVersionCommandExecution(t *testing.T) {
 	// Test that version command can execute without error
 	var buf bytes.Buffer
-	versionCmd.SetOutput(&buf)
+	versionCmd.SetOut(&buf)
+	versionCmd.SetErr(&buf)
 
 	versionCmd.Run(&cobra.Command{}, []string{})
 
@@ -28,7 +29,8 @@ func TestVersionCommandExecution(t *testing.T) {
 func TestVersionCommandWithArguments(t *testing.T) {
 	// Test that version command ignores arguments (as it should)
 	var buf bytes.Buffer
-	versionCmd.SetOutput(&buf)
+	versionCmd.SetOut(&buf)
+	versionCmd.SetErr(&buf)
 
 	versionCmd.Run(&cobra.Command{}, []string{"arg1", "arg2"})
 

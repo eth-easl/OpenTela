@@ -43,7 +43,7 @@ func getGlobalTransport() *http.Transport {
 }
 
 func ErrorHandler(res http.ResponseWriter, req *http.Request, err error) {
-	if _, werr := res.Write([]byte(fmt.Sprintf("ERROR: %s", err.Error()))); werr != nil {
+	if _, werr := fmt.Fprintf(res, "ERROR: %s", err.Error()); werr != nil {
 		common.Logger.Error("Error writing error response: ", werr)
 	}
 }

@@ -32,7 +32,7 @@ func NewTestResponseRecorder() *TestResponseRecorder {
 // Mock upstream server
 func newMockUpstream() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(io.Discard, r.Body) // Drain body
+		_, _ = io.Copy(io.Discard, r.Body) // Drain body
 		w.WriteHeader(http.StatusOK)
 	}))
 }
