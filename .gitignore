@@ -2,3 +2,4 @@ examples/
 _internal/
 .env
 __pycache__
+*.out
