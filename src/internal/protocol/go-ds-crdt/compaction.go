@@ -56,10 +56,7 @@ func (store *Datastore) CompactTombstones(ctx context.Context, olderThan time.Du
 		write = batch
 	}
 
-	for {
-		if limit > 0 && removed >= limit {
-			break
-		}
+	for limit <= 0 || removed < limit {
 
 		var (
 			res query.Result

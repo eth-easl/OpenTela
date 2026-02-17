@@ -1,12 +1,23 @@
+version: "2"
 run:
-  timeout: 5m
-  modules-download-mode: mod
-  go: "1.23"
-
+    go: "1.23"
+    modules-download-mode: mod
 linters:
-  disable:
-    - typecheck
-
-issues:
-  exclude-dirs-use-default: true
-
+    exclusions:
+        generated: lax
+        presets:
+            - comments
+            - common-false-positives
+            - legacy
+            - std-error-handling
+        paths:
+            - third_party$
+            - builtin$
+            - examples$
+formatters:
+    exclusions:
+        generated: lax
+        paths:
+            - third_party$
+            - builtin$
+            - examples$

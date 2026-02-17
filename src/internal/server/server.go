@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
 )
 
@@ -102,6 +103,10 @@ func StartServer() {
 			"openapiUrl": "/openapi.yaml",
 		})
 	})
+	
+	// Prometheus metrics
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
 	go protocol.StartTicker()
 	subProcess := viper.GetString("subprocess")
 	if subProcess != "" {
@@ -160,7 +165,7 @@ func StartServer() {
 	}()
 	<-ctx.Done()
 	// shutting down...
-	protocol.DeleteNodeTable()
+	protocol.AnnounceLeave()
 	protocol.ClearCRDTStore()
 	time.Sleep(5 * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

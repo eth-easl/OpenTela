@@ -20,6 +20,7 @@ var myself Peer
 const (
 	CONNECTED    string = "connected"
 	DISCONNECTED string = "disconnected"
+	LEFT         string = "left"
 )
 
 type Service struct {
@@ -119,15 +120,27 @@ func MarkSelfAsBootstrap() {
 	}
 }
 
-func DeleteNodeTable() {
+func AnnounceLeave() {
 	ctx := context.Background()
 	host, _ := GetP2PNode(nil)
 	// broadcast the peer to the network
 	store, _ := GetCRDTStore()
 	key := ds.NewKey(host.ID().String())
-	common.Logger.Info("Removing myself from the network")
-	if err := store.Delete(ctx, key); err != nil {
-		common.Logger.Error("Error while removing myself from the network: ", err)
+	common.Logger.Info("Announcing myself as LEFT from the network")
+
+	// Update self status to LEFT
+	myself.Status = LEFT
+	myself.Connected = false
+	myself.LastSeen = time.Now().Unix()
+
+	value, err := json.Marshal(myself)
+	if err != nil {
+		common.Logger.Error("Error while marshalling peer for leave: ", err)
+		return
+	}
+
+	if err := store.Put(ctx, key, value); err != nil {
+		common.Logger.Error("Error while announcing leave: ", err)
 	}
 }
 
@@ -136,6 +149,14 @@ func UpdateNodeTableHook(key ds.Key, value []byte) {
 	var peer Peer
 	err := json.Unmarshal(value, &peer)
 	common.ReportError(err, "Error while unmarshalling peer")
+
+	// Check for Left status
+	if peer.Status == LEFT {
+		common.Logger.Debugf("Peer [%s] has left, removing from table", peer.ID)
+		DeleteNodeTableHook(key)
+		return
+	}
+
 	// Preserve locally computed connectivity status if we already know this peer
 	tableUpdateSem <- struct{}{}
 	defer func() { <-tableUpdateSem }() // Release on exit

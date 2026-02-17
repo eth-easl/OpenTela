@@ -1,63 +1,115 @@
 name: CI
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
 
 permissions:
-  contents: read
+    contents: read
+    pull-requests: write
 
 jobs:
-  test:
-    name: Go tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    test:
+        name: Go tests
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: src
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: src/go.mod
-          cache: true
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: src/go.mod
+                  cache: true
 
-      - name: Run tests via Makefile
-        run: make test VERBOSE=1
+            - name: Run tests via Makefile
+              run: make test VERBOSE=1
 
-      - name: Print coverage summary
-        if: always()
-        run: |
-          if [ -f build/coverage.txt ]; then
-            go tool cover -func=build/coverage.txt | tail -n 1
-          else
-            echo "No coverage file found"
-          fi
+            - name: Generate Coverage Report
+              if: always()
+              run: |
+                  if [ -f build/coverage.txt ]; then
+                    go tool cover -func=build/coverage.txt > coverage.txt
+                  fi
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+            - name: Comment Coverage
+              if: always() && github.event_name == 'pull_request'
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const fs = require('fs');
+                      let coverageOutput = '';
+                      try {
+                        coverageOutput = fs.readFileSync('src/coverage.txt', 'utf8');
+                      } catch (error) {
+                        console.log('No coverage report found');
+                        return;
+                      }
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: src/go.mod
-          cache: true
+                      // Format the coverage output for the comment
+                      const body = `### Test Coverage Report 📊
 
-      - name: GolangCI-Lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.60.3
-          working-directory: src
-          args: --timeout=5m
+                      <details>
+                      <summary>Click to view detailed coverage</summary>
 
+                      \`\`\`text
+                      ${coverageOutput}
+                      \`\`\`
+                      </details>
+
+                      **Summary:** ${coverageOutput.split('\n').pop().trim()}
+                      `;
+
+                      const { data: comments } = await github.rest.issues.listComments({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: context.issue.number,
+                      });
+
+                      const botComment = comments.find(comment =>
+                        comment.user.type === 'Bot' && comment.body.includes('### Test Coverage Report')
+                      );
+
+                      if (botComment) {
+                        await github.rest.issues.updateComment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          comment_id: botComment.id,
+                          body: body
+                        });
+                      } else {
+                        await github.rest.issues.createComment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: context.issue.number,
+                          body: body
+                        });
+                      }
+
+    lint:
+        name: Lint
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: src
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: src/go.mod
+                  cache: true
+
+            - name: golangci-lint
+              uses: golangci/golangci-lint-action@v9
+              with:
+                  version: v2.6
+                  working-directory: src
+                  args: --timeout=5m

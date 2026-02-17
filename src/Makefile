@@ -165,7 +165,7 @@ bin/golangci-lint-${GOLANGCI_VERSION}:
 
 .PHONY: lint
 lint: bin/golangci-lint ## Run linters
-	GOTOOLCHAIN=go1.23.0 bin/golangci-lint run ${GOLANGCI_FLAGS} ${LINT_PKGS}
+	bin/golangci-lint run ${GOLANGCI_FLAGS} ${LINT_PKGS}
 
 release-%: TAG_PREFIX = v
 release-%:
