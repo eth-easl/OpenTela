@@ -160,7 +160,7 @@ func StartServer() {
 	}()
 	<-ctx.Done()
 	// shutting down...
-	protocol.DeleteNodeTable()
+	protocol.AnnounceLeave()
 	protocol.ClearCRDTStore()
 	time.Sleep(5 * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

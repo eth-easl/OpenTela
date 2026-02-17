@@ -35,9 +35,20 @@ func startTombstoneCompactor(store *crdt.Datastore) {
 			interval = defaultTombstoneCompactionInterval
 		}
 
+		// Initialize TombstoneManager
+		tm := GetTombstoneManager(store)
+
 		ctx := store.Context()
 		go func() {
 			run := func() {
+				// 1. Clean up "Left" nodes (Application level tombstones)
+				if removedLeft, err := tm.CleanupLeftNodes(ctx); err != nil {
+					common.Logger.Warnf("Left nodes cleanup failed: %v", err)
+				} else if removedLeft > 0 {
+					common.Logger.Infof("Cleaned up %d left nodes", removedLeft)
+				}
+
+				// 2. Compact CRDT tombstones (Storage level tombstones)
 				removed, err := store.CompactTombstones(ctx, retention, batch)
 				if err != nil {
 					if ctx.Err() == nil {
