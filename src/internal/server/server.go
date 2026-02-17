@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
 )
 
@@ -102,6 +103,10 @@ func StartServer() {
 			"openapiUrl": "/openapi.yaml",
 		})
 	})
+	
+	// Prometheus metrics
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
 	go protocol.StartTicker()
 	subProcess := viper.GetString("subprocess")
 	if subProcess != "" {
