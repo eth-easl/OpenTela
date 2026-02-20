@@ -3,9 +3,11 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -19,13 +21,54 @@ import (
 	"github.com/axiomhq/axiom-go/axiom/ingest"
 	"github.com/buger/jsonparser"
 	"github.com/gin-gonic/gin"
+	gostream "github.com/libp2p/go-libp2p-gostream"
 	p2phttp "github.com/libp2p/go-libp2p-http"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"golang.org/x/net/http2"
 )
 
 var (
-	globalTransport *http.Transport
-	transportOnce   sync.Once
+	globalTransport     *http.Transport
+	globalH2CTransport  *http2.Transport
+	localH2CTransport   *http2.Transport
+	transportOnce       sync.Once
+	h2cTransportOnce    sync.Once
+	localH2COnce        sync.Once
 )
+
+func getGlobalH2CTransport() *http2.Transport {
+	h2cTransportOnce.Do(func() {
+		node, _ := protocol.GetP2PNode(nil)
+		globalH2CTransport = &http2.Transport{
+			AllowHTTP: true,
+			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+				host, _, err := net.SplitHostPort(addr)
+				if err != nil {
+					host = addr
+				}
+				serverPID, err := peer.Decode(host)
+				if err != nil {
+					return nil, fmt.Errorf("failed to decode peer ID: %w", err)
+				}
+				return gostream.Dial(ctx, node, serverPID, p2phttp.DefaultP2PProtocol)
+			},
+		}
+	})
+	return globalH2CTransport
+}
+
+func getLocalH2CTransport() *http2.Transport {
+	localH2COnce.Do(func() {
+		localH2CTransport = &http2.Transport{
+			AllowHTTP: true,
+			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, network, addr)
+			},
+		}
+	})
+	return localH2CTransport
+}
 
 func getGlobalTransport() *http.Transport {
 	transportOnce.Do(func() {
@@ -94,6 +137,9 @@ func P2PForwardHandler(c *gin.Context) {
 
 	director := func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
+		if strings.HasPrefix(req.Header.Get("Content-Type"), "application/grpc") {
+			req.URL.Scheme = "https"
+		}
 		req.URL.Path = target.Path
 		req.URL.Host = req.Host
 		req.Host = target.Host
@@ -102,10 +148,20 @@ func P2PForwardHandler(c *gin.Context) {
 
 	proxy := httputil.NewSingleHostReverseProxy(&target)
 	proxy.Director = director
-	proxy.Transport = getGlobalTransport()
+	if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/grpc") {
+		proxy.Transport = getGlobalH2CTransport()
+	} else {
+		proxy.Transport = getGlobalTransport()
+	}
 	proxy.ErrorHandler = ErrorHandler
 	proxy.ModifyResponse = rewriteHeader()
-	proxy.ServeHTTP(c.Writer, c.Request)
+
+	// Wrap the response writer to handle streaming properly
+	streamWriter := &StreamAwareResponseWriter{
+		ResponseWriter: c.Writer,
+		flusher:        c.Writer.(http.Flusher),
+	}
+	proxy.ServeHTTP(streamWriter, c.Request)
 }
 
 // ServiceHandler
@@ -127,19 +183,24 @@ func ServiceForwardHandler(c *gin.Context) {
 		req.Host = target.Host
 		req.URL.Host = req.Host
 		req.URL.Scheme = target.Scheme
+		if strings.HasPrefix(req.Header.Get("Content-Type"), "application/grpc") {
+			req.URL.Scheme = "https"
+		}
 		req.URL.Path = target.Path
 	}
 	proxy := httputil.NewSingleHostReverseProxy(&target)
 	proxy.Director = director
-	// Use global transport here too if we want pooling to external HTTP services,
-	// though standard http.DefaultTransport also pools.
-	// However, if we want shared settings (timeouts), we can use ours.
-	// NOTE: standard http transport doesn't support libp2p.
-	// Ideally we separate p2p transport from standard http transport, OR register protocols on one.
-	// Our getGlobalTransport() has registered libp2p, so it works for both (http falls back to standard).
-	proxy.Transport = getGlobalTransport()
+	if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/grpc") {
+		proxy.Transport = getLocalH2CTransport()
+	} else {
+		proxy.Transport = getGlobalTransport()
+	}
 
-	proxy.ServeHTTP(c.Writer, c.Request)
+	streamWriter := &StreamAwareResponseWriter{
+		ResponseWriter: c.Writer,
+		flusher:        c.Writer.(http.Flusher),
+	}
+	proxy.ServeHTTP(streamWriter, c.Request)
 }
 
 // in case of global service, we need to forward the request to the service, identified by the service name and identity group
@@ -223,6 +284,9 @@ func GlobalServiceForwardHandler(c *gin.Context) {
 	}
 	director := func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
+		if strings.HasPrefix(req.Header.Get("Content-Type"), "application/grpc") {
+			req.URL.Scheme = "https"
+		}
 		req.URL.Path = target.Path
 		req.URL.Host = req.Host
 		req.Host = target.Host
@@ -230,7 +294,11 @@ func GlobalServiceForwardHandler(c *gin.Context) {
 	}
 	proxy := httputil.NewSingleHostReverseProxy(&target)
 	proxy.Director = director
-	proxy.Transport = getGlobalTransport()
+	if strings.HasPrefix(c.Request.Header.Get("Content-Type"), "application/grpc") {
+		proxy.Transport = getGlobalH2CTransport()
+	} else {
+		proxy.Transport = getGlobalTransport()
+	}
 	proxy.ErrorHandler = ErrorHandler
 	proxy.ModifyResponse = func(r *http.Response) error {
 		if err := rewriteHeader()(r); err != nil {

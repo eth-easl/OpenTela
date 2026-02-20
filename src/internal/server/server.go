@@ -15,6 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 func StartServer() {
@@ -145,12 +147,13 @@ func StartServer() {
 		}
 	}
 	p2plistener := P2PListener()
+	h2cHandler := h2c.NewHandler(r, &http2.Server{})
 	srv := &http.Server{
 		Addr:    "0.0.0.0:" + viper.GetString("port"),
-		Handler: r,
+		Handler: h2cHandler,
 	}
 	go func() {
-		err := http.Serve(p2plistener, r)
+		err := http.Serve(p2plistener, h2cHandler)
 		if err != nil {
 			common.Logger.Errorf("http.Serve: %s", err)
 		}
