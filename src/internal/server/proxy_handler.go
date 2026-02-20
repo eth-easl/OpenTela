@@ -126,14 +126,6 @@ func (s *StreamAwareResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error
 	return nil, nil, http.ErrNotSupported
 }
 
-// CloseNotify implements http.CloseNotifier (deprecated but ReverseProxy may still check it)
-func (s *StreamAwareResponseWriter) CloseNotify() <-chan bool {
-	if cn, ok := s.ResponseWriter.(http.CloseNotifier); ok {
-		return cn.CloseNotify()
-	}
-	return nil
-}
-
 // Push implements http.Pusher
 func (s *StreamAwareResponseWriter) Push(target string, opts *http.PushOptions) error {
 	if p, ok := s.ResponseWriter.(http.Pusher); ok {
