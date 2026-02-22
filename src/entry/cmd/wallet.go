@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"ocf/internal/wallet"
 	"time"
+
 	"github.com/spf13/cobra"
 )
 
@@ -92,5 +93,5 @@ func init() {
 	walletCmd.AddCommand(walletCreateCmd)
 	walletCmd.AddCommand(walletListCmd)
 	walletCmd.AddCommand(walletInfoCmd)
-	rootcmd.AddCommand(walletCmd)
+	// rootcmd.AddCommand(walletCmd)
 }
