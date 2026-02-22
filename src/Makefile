@@ -94,7 +94,7 @@ ifeq (${VERBOSE}, 1)
 endif
 
 	@mkdir -p ${BUILD_DIR}
-	go build ${GOARGS} -trimpath -tags "${GOTAGS}" -ldflags "${LDFLAGS}" -o ${BUILD_DIR} ./entry... 
+	go build ${GOARGS} -trimpath -tags "${GOTAGS}" -ldflags "${LDFLAGS}" -o ${BUILD_DIR} ./entry...
 	@${MAKE} post-build
 
 .PHONY: build-release-deps
@@ -115,7 +115,12 @@ build-release: build-release-deps pre-build-release
 build-release: ## Build binaries without debug information
 	@${MAKE} LDFLAGS="-w ${LDFLAGS}" GOARGS="${GOARGS} -trimpath" BUILD_DIR="${BUILD_DIR}/release" build
 	mv build/release/entry build/release/ocf-amd64
+	@${MAKE} GOOS=linux GOARCH=arm64 LDFLAGS="-w ${LDFLAGS}" GOARGS="${GOARGS} -trimpath" BUILD_DIR="${BUILD_DIR}/release" build
+	mv build/release/entry build/release/ocf-arm64
+	@echo "Build release complete. Built binaries:"
+	@ls -lh build/release/ocf-*
 	@${MAKE} post-build-release
+
 
 .PHONY: build-debug-deps
 build-debug-deps: build-deps
@@ -225,4 +230,3 @@ upload:
 # Variable outputting/exporting rules
 var-%: ; @echo $($*)
 varexport-%: ; @echo $*=$($*)
-

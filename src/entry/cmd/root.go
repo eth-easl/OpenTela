@@ -16,8 +16,8 @@ import (
 
 var cfgFile string
 var rootcmd = &cobra.Command{
-	Use:   "ocfcore",
-	Short: "ocfcore",
+	Use:   "ocf",
+	Short: "OpenFabric is a decentralized fabric for running machine learning applications.",
 	Long:  ``,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initConfig(cmd)
@@ -32,9 +32,7 @@ var rootcmd = &cobra.Command{
 
 //nolint:gochecknoinits
 func init() {
-
 	rootcmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/ocf/cfg.yaml)")
-
 	startCmd.Flags().String("wallet.account", "", "wallet account")
 	startCmd.Flags().String("account.wallet", "", "path to wallet key file")
 	startCmd.Flags().String("bootstrap.addr", "http://152.67.71.5:8092/v1/dnt/bootstraps", "bootstrap address")
