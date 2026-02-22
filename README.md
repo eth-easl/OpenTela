@@ -1,72 +1,30 @@
 # OpenFabric
 
-**OpenFabric** (Aka: Open Compute Framework) is a robust, distributed computing platform designed to orchestrate computing resources across a decentralized network. It leverages peer-to-peer networking, CRDT-based state management to create a resilient and scalable research computer.
+[![GitHub Repo](https://img.shields.io/badge/github-eth--easl%2FOpenFabric-black?logo=github)](https://github.com/eth-easl/OpenFabric) ![CI Workflow](https://github.com/eth-easl/OpenFabric/actions/workflows/ci.yml/badge.svg) [![License](https://img.shields.io/github/license/eth-easl/OpenFabric)](LICENSE)
+
+**OpenFabric** (Aka: Open Compute Framework) is a distributed computing platform designed to orchestrate computing resources across a decentralized network. It leverages peer-to-peer networking, CRDT-based state management to create a resilient and scalable network of computing resources. It is used to power the [serving system at SwissAI Initiative](https://serving.swissai.cscs.ch).
+
+## Latest Updates
+
+*   **[2026/02]** 💡 **How SwissAI Leverages OpenFabric**: We wrote a case study on how SwissAI uses OpenFabric to orchestrate their distributed GPU nodes for scalable model serving. [Read more](docs/posts/swissai.md).
 
 ## Features
 
-- **P2P Networking**: Built on top of `libp2p`, ensuring decentralized and resilient communication between nodes.
-- **CRDT State Management**: Uses Conflict-free Replicated Data Types (CRDTs) for eventually consistent state across the network, including a robust **Tombstone Mechanism** to handle node departures cleanly.
-- **High Performance**: Features optimized proxy handlers with request streaming and connection pooling to minimize latency and memory usage.
-- **Observability**: Built-in metrics and logging, compatible with Prometheus and Axiom.
+- **Decentralized Orchestration**: OpenFabric eliminates the need for a central coordinator by using a gossip-based P2P network. It utilizes a Conflict-free Replicated Data Type (CRDT) registry to manage service discovery, health monitoring, and routing across distributed nodes. This architecture allows the system to remain operational and maintain a global view of resources even during network partitions.
+
+- **Non-Invasive HPC Integration**: Designed specifically for the constraints of supercomputing environments, the system operates entirely as a user-space overlay. It bridges the gap between batch schedulers (like Slurm) and interactive serving engines (like vLLM or SGLang) without requiring root privileges or kernel modifications. This allows researchers to spin up "cloud-like" serving clusters using standard permissions.
+
+- **Robust Fault Tolerance and Elasticity**: OpenFabric is built for high-churn environments where resources are often volatile or preemptible (e.g., [scavenger queues](https://docs.icer.msu.edu/Scavenger_Queue/), [preemptible cloud instances](https://docs.cloud.google.com/compute/docs/instances/preemptible) or [slurm preemption](https://slurm.schedmd.com/preempt.html)). It utilizes peer-to-peer heartbeats to detect node failures within seconds, automatically marking failed nodes as "LEFT" and rerouting traffic to healthy replicas without service interruption.
 
 ## Adoption
 
 - OpenFabric is used to power [SwissAI Serving](https://serving.swissai.cscs.ch/). It acts as the decentralized orchestration layer, routing inference requests to distributed GPU nodes while managing state, metrics, and peer discovery to ensure resilient and scalable model serving.
 
-## Architecture
-
-OpenFabric consists of the following key components:
-
-- **Node Table**: A CRDT-based registry of all active peers in the network.
-- **Tombstone Manager**: Automatically cleans up metadata for nodes that have permanently left the network to prevent "ghost peers".
-- **Proxy Server**: Handles external requests and routes them to the appropriate internal components or other nodes.
-- **Entry Points**:
-    - `src/entry/main.go`: The main Go entry point for the node server.
-    - `main.py`: Python entry point (client/SDK).
-
-## Getting Started
-
-### Prerequisites
-
-- **Go**: Version 1.25.0 or higher.
-- **Docker**: (Optional) For containerized deployment.
-
-### Installation
-
-Clone the repository:
-
-```bash
-git clone https://github.com/your-org/OpenFabric.git
-cd OpenFabric
-```
-
-Install Go dependencies:
-
-```bash
-cd src
-go mod download
-```
-
-### Usage
-
-To start the OpenFabric node:
-
-```bash
-cd src
-go run entry/main.go start
-```
-
-For available commands:
-
-```bash
-cd src
-go run entry/main.go --help
-```
-
 ## Documentation
 
-- [CRDT Tombstones](docs/crdt_tombstones.md)
-- [Performance Optimization](docs/performance_optimization_proxy.md)
+- [Installation](docs/tutorial/installation.md)
+- [Spin Up a network](docs/tutorial/spinup.md)
+- [Glossary](docs/tutorial/glossary.md)
 
 ## Contributing
 
@@ -74,4 +32,4 @@ Contributions are welcome! Please follow the code of conduct and submit pull req
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache v2 License - see the [LICENSE](LICENSE) file for details.
