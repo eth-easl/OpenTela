@@ -1,158 +1,163 @@
 name: Build and Release Go Binary
 
 on:
-  push:
-    tags:
-      - 'v*'   # Run when pushing a version tag like v1.0.0
+    push:
+        tags:
+            - "v*" # Run when pushing a version tag like v1.0.0
 
 jobs:
-  burn-version:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout the repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    burn-version:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout the repository
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
-      - name: Get release version
-        id: get_version
-        run: |
-          echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+            - name: Get release version
+              id: get_version
+              run: |
+                  echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Checkout release tag
-        run: |
-          git checkout tags/${{ env.RELEASE_TAG }} -b release-version-update
+            - name: Checkout release tag
+              run: |
+                  git checkout tags/${{ env.RELEASE_TAG }} -b release-version-update
 
-      - name: Update version in code
-        run: |
-          # Replace in a specific file — adjust pattern and file path
-          sed -i "s/0\.0\.0-dev\.0/${{ env.RELEASE_TAG }}/g" src/internal/protocol/host.go
+            - name: Update version in code
+              run: |
+                  # Replace in a specific file — adjust pattern and file path
+                  sed -i "s/0\.0\.0-dev\.0/${{ env.RELEASE_TAG }}/g" src/internal/protocol/host.go
 
-      - name: Commit and push changes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/internal/protocol/host.go
-          git commit -m "Update version to ${{ env.RELEASE_TAG }}"
-          git tag -d ${{ env.RELEASE_TAG }}
-          git tag -f ${{ env.RELEASE_TAG }}
-          git push --force origin refs/tags/${{ env.RELEASE_TAG }}
-  build:
-    name: Build Go Binary
-    runs-on: ubuntu-latest
+            - name: Commit and push changes
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+                  git add src/internal/protocol/host.go
+                  git commit -m "Update version to ${{ env.RELEASE_TAG }}"
+                  git tag -d ${{ env.RELEASE_TAG }}
+                  git tag -f ${{ env.RELEASE_TAG }}
+                  git push --force origin refs/tags/${{ env.RELEASE_TAG }}
+    build:
+        name: Build Go Binary
+        runs-on: ubuntu-latest
 
-    steps:
-      - name: Check out source code
-        uses: actions/checkout@v4
+        steps:
+            - name: Check out source code
+              uses: actions/checkout@v4
 
-      - name: Get release version
-        id: get_version
-        run: |
-          echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+            - name: Get release version
+              id: get_version
+              run: |
+                  echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Checkout release tag
-        run: |
-          git fetch --tags --all --force
-          git checkout tags/${{ env.RELEASE_TAG }}
+            - name: Checkout release tag
+              run: |
+                  git fetch --tags --all --force
+                  git checkout tags/${{ env.RELEASE_TAG }}
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: src/go.mod
-          cache: true
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: src/go.mod
+                  cache: true
 
-      - name: Build production binary
-        run: |
-          cd src
-          GOOS=linux GOARCH=amd64 GIN_MODE=release go build -trimpath -tags "" -ldflags "-X main.version=${VERSION} -X main.commitHash=${COMMIT_HASH} -X main.buildDate=${BUILD_DATE} -X main.authUrl=$(AUTH_URL) -X main.authClientId=$(AUTH_CLIENT_ID) -X main.authSecret=$(AUTH_CLIENT_SECRET) -X main.sentryDSN=$(SENTRY_DSN)" -o ./build/release/ ./entry...
-          mv build/release/entry build/release/ocf-amd64
-          GOOS=linux GOARCH=arm64 GIN_MODE=release go build -trimpath -tags "" -ldflags "-X main.version=${VERSION} -X main.commitHash=${COMMIT_HASH} -X main.buildDate=${BUILD_DATE} -X main.authUrl=$(AUTH_URL) -X main.authClientId=$(AUTH_CLIENT_ID) -X main.authSecret=$(AUTH_CLIENT_SECRET) -X main.sentryDSN=$(SENTRY_DSN)" -o ./build/release/ ./entry...
-          mv build/release/entry build/release/ocf-arm64
+            - name: Set build metadata
+              run: |
+                  echo "VERSION=${{ env.RELEASE_TAG }}" >> $GITHUB_ENV
+                  echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+                  echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
 
+            - name: Build production binary
+              run: |
+                  cd src
+                  GOOS=linux GOARCH=amd64 GIN_MODE=release go build -trimpath -tags "" -ldflags "-X main.version=${VERSION} -X main.commitHash=${COMMIT_HASH} -X main.buildDate=${BUILD_DATE}" -o ./build/release/ ./entry/...
+                  mv build/release/entry build/release/ocf-amd64
+                  GOOS=linux GOARCH=arm64 GIN_MODE=release go build -trimpath -tags "" -ldflags "-X main.version=${VERSION} -X main.commitHash=${COMMIT_HASH} -X main.buildDate=${BUILD_DATE}" -o ./build/release/ ./entry/...
+                  mv build/release/entry build/release/ocf-arm64
 
-      - name: Create GitHub Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            src/build/release/ocf-amd64
-            src/build/release/ocf-arm64
+            - name: Create GitHub Release
+              id: create_release
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: |
+                      src/build/release/ocf-amd64
+                      src/build/release/ocf-arm64
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    publish-docker-images:
+        runs-on: ubuntu-latest
+        needs: build
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  
-  publish-docker-images:
-    runs-on: ubuntu-latest
-    needs: build
-    env:
-      REGISTRY: ghcr.io
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - dockerfile: ./docker/dispatcher/Dockerfile
-            image: researchcomputer/ocf
-            platform: linux/amd64
+            REGISTRY: ghcr.io
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - dockerfile: ./docker/dispatcher/Dockerfile
+                      image: researchcomputer/ocf
+                      platform: linux/amd64
 
-    permissions:
-      contents: read
-      packages: write
-      # This is used to complete the identity challenge
-      # with sigstore/fulcio when running outside of PRs.
-      id-token: write
+        permissions:
+            contents: read
+            packages: write
+            # This is used to complete the identity challenge
+            # with sigstore/fulcio when running outside of PRs.
+            id-token: write
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Get release version
-        id: get_version
-        run: |
-          echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-      - name: Checkout release tag
-        run: |
-          git fetch --tags --all --force
-          git checkout tags/${{ env.RELEASE_TAG }}
-      
-      # Set up BuildKit Docker container builder to be able to build
-      # multi-platform images and export cache
-      # https://github.com/docker/setup-buildx-action
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+            - name: Get release version
+              id: get_version
+              run: |
+                  echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+            - name: Checkout release tag
+              run: |
+                  git fetch --tags --all --force
+                  git checkout tags/${{ env.RELEASE_TAG }}
 
-      # Login against a Docker registry except on PR
-      # https://github.com/docker/login-action
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+            # Set up BuildKit Docker container builder to be able to build
+            # multi-platform images and export cache
+            # https://github.com/docker/setup-buildx-action
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
 
-      # Extract metadata (tags, labels) for Docker
-      # https://github.com/docker/metadata-action
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # v5.0.0
-        with:
-          images: ghcr.io/researchcomputer/ocf
-          tags: |
-            type=ref,event=tag
+            # Login against a Docker registry except on PR
+            # https://github.com/docker/login-action
+            - name: Login to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GHCR_TOKEN }}
 
-      # Build and push Docker image with Buildx (don't push on PR)
-      # https://github.com/docker/build-push-action
-      - name: Build and push Docker image
-        id: build-and-push
-        uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          platforms: linux/amd64
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            VERSION=${{ env.RELEASE_TAG }}
-            TARGETPLATFORM=${{ matrix.platform }}
+            # Extract metadata (tags, labels) for Docker
+            # https://github.com/docker/metadata-action
+            - name: Extract Docker metadata
+              id: meta
+              uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934 # v5.0.0
+              with:
+                  images: ghcr.io/researchcomputer/ocf
+                  tags: |
+                      type=ref,event=tag
+
+            # Build and push Docker image with Buildx (don't push on PR)
+            # https://github.com/docker/build-push-action
+            - name: Build and push Docker image
+              id: build-and-push
+              uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5.0.0
+              with:
+                  context: .
+                  file: ${{ matrix.dockerfile }}
+                  push: true
+                  tags: ${{ steps.meta.outputs.tags }}
+                  platforms: linux/amd64
+                  labels: ${{ steps.meta.outputs.labels }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+                  build-args: |
+                      VERSION=${{ env.RELEASE_TAG }}
+                      TARGETPLATFORM=${{ matrix.platform }}

@@ -9,7 +9,6 @@
 - **High Performance**: Features optimized proxy handlers with request streaming and connection pooling to minimize latency and memory usage.
 - **Observability**: Built-in metrics and logging, compatible with Prometheus and Axiom.
 
-
 ## Adoption
 
 - OpenFabric is used to power [SwissAI Serving](https://serving.swissai.cscs.ch/). It acts as the decentralized orchestration layer, routing inference requests to distributed GPU nodes while managing state, metrics, and peer discovery to ensure resilient and scalable model serving.
