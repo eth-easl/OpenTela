@@ -75,7 +75,7 @@ As you can see, there is only one node in the cluster now, which is the head nod
 The second node, or we call it the `worker node`, is a node that connects to the head node and serves as a worker in your cluster. This node should be a machine with GPU resources, so it can serve LLMs and handle requests from users. We use vLLM as an example of the LLM serving framework (and assume that you have already installed it according to [vLLM docs](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/#requirements), and that you have `vllm` command ready in your $PATH). Once you have OpenFabric and vLLM installed, you can spin up the worker node and connect it to the head node with the following command:
 
 ```bash
-./ocf start --bootstrap.addr /ip4/{YOUR_IP_ADDR}/tcp/43905/p2p/{YOUR_HEAD_NODE_PEER_ID} --subprocess "vllm serve Qwen/Qwen3-8B --max_model_len 16384 --port 8080" --service.name llm --service.port 8080
+./ocf start --bootstrap.addr /ip4/{YOUR_IP_ADDR}/tcp/43905/p2p/{YOUR_HEAD_NODE_PEER_ID} --subprocess "vllm serve Qwen/Qwen3-8B --max_model_len 16384 --port 8080" --service.name llm --service.port 8080 --seed 1
 ```
 
 In the above command:
@@ -83,6 +83,7 @@ In the above command:
 - `--subprocess "vllm serve Qwen/Qwen3-8B --max_model_len 16384 --port 8080"` specifies the command to start the LLM serving subprocess. In this example, we use vLLM to serve the Qwen3-8B model, with a maximum model length of 16384 tokens, and listen on port 8080. You can replace this command with any other command to serve your desired LLM, as long as it listens on a specific port for incoming requests.
 - `--service.name llm` specifies the name of the service provided by this node, which is `llm` in this case. For LLM serving purpose, please do not modify/remove this flag, as OpenFabric will use this information to route requests to the correct nodes.
 - `--service.port 8080` specifies the port number of the service provided by this node, which is 8080 in this case. This should be the same port number as the one used in the subprocess command.
+- `--seed 1` sets the random seed to 1, so that this worker node will randomly generate a different peer ID from the head node. You can also set it to any other number, or even remove this flag to have a random seed, as long as the peer ID of this worker node is different from the head node.
 
 Once you run the above command, OpenFabric will start the subprocess to serve the LLM, and connect this worker node to the head node. 
 
@@ -174,3 +175,70 @@ and once the worker node is successfully connected to the head node, you can ope
 ```
 
 As you can see, there are now two nodes in the cluster: the head node with peer ID `QmafRyc9ef1KKKMfG973aApDKCEEjnhf89dZDckgUeSMbB`, and the worker node with peer ID `QmPneGvHmWMngc8BboFasEJQ7D2aN9C65iMDwgCRGaTazs`. The worker node has the `llm` service registered, and it shows the model information of the served LLM (Qwen/Qwen3-8B) in the identity group.
+
+You can spin up more worker nodes with the same command as in Step 2 with various different LLMs served, as well as different hardware configurations or serving frameworks. Each worker node will connect to the head node and register its service information, and you can see all the nodes and their services in the status page of the head node.
+
+## Step 3: Send requests to the cluster
+
+Once you have the cluster of LLM serving nodes up and running, you can send requests to the cluster through the head node, and OpenFabric will route the requests to the appropriate worker nodes based on the service information (particularly `identity_group`) registered by each node.
+
+For example, if you want to send a request to the LLM service to generate text with the Qwen3-8B model above, you can send a request to the head node at `http://{YOUR_IP_ADDR}:8092/v1/` with the following JSON body:
+
+```python
+import requests
+
+response = requests.post(
+    "http://{YOUR_HEAD_NODE_IP_ADDR}:8092/v1/service/llm/v1/chat/completions",
+    headers={
+        "Authorization": "Bearer test-token",
+        "Content-Type": "application/json"
+    },
+    json={
+        "model": "Qwen/Qwen3-8B",
+        "messages": [{"role": "user", "content": "Hello, world!"}]
+    }
+)
+print(response.json())
+```
+
+In the above code, you should replace `{YOUR_HEAD_NODE_IP_ADDR}` with the actual IP address of your head node. The request is sent to the head node's API endpoint for the `llm` service, and it includes the model information in the JSON body. OpenFabric will route this request to the worker node that serves the Qwen3-8B model (using the `identity_group` information), and you should get a response from the vLLM API server with the generated text.
+
+```json
+{"id": "chatcmpl-8a81b873db0141cd901821fef0a902c0", "object": "chat.completion", "created": 1771766516, "model": "Qwen/Qwen3-8B", "choices": [{"index": 0, "message": {"role": "assistant", "content": "<think>\nOkay, the user said "Hello, world!" so they\"re probably just testing the waters or starting a conversation. I need to respond in a friendly and welcoming manner. Let me make sure to acknowledge their greeting and invite them to ask questions or share more. I should keep it simple and positive. Maybe add an emoji to keep it light. Let me check if there\"s anything else they might need. No, just a standard response should work here.\n</think>\n\nHello! 😊 How can I assist you today? Whether you have questions, need help with something, or just want to chat, I\"m here for you!", "refusal": None, "annotations": None, "audio": None, "function_call": None, "tool_calls": [], "reasoning_content": None}, "logprobs": None, "finish_reason": "stop", "stop_reason": None}], "service_tier": None, "system_fingerprint": None, "usage": {"prompt_tokens": 12, "total_tokens": 141, "completion_tokens": 129, "prompt_tokens_details": None}, "prompt_logprobs": None, "kv_transfer_params": None}
+```
+
+If you desire to send the requests to a particular worker node instead of leveraging the built-in routing logic of OpenFabric, you can also send the request directly to the worker node's API endpoint, through the head node as a proxy. For example, in the above cluster setup, you can force OpenFabric to route the request the worker node with the code below:
+
+```python
+import requests
+response = requests.post(
+    "http://{YOUR_HEAD_NODE_IP_ADDR}:8092/v1/p2p/{YOUR_WORKER_PEER_ID}/v1/_service/llm/v1/chat/completions",
+    headers={
+        "Authorization": "Bearer test-token",
+        "Content-Type": "application/json"
+    },
+    json={
+        "model": "Qwen/Qwen3-8B",
+        "messages": [{"role": "user", "content": "Hello, world!"}]
+    }
+)
+print(response.json())
+```
+
+As long as the serving engine (e.g., `vLLM` or `SGLang`) is compatible with OpenAI protocol (e.g., has `/completions` and/or `/chat/completions` endpoint), OpenFabric is compatible with it as well and can be used with any OpenAI-compatible client. For example, you can also use `openai` python package to send requests to the cluster like this:
+
+```python
+import openai
+client = openai.OpenAI(
+    base_url="http://140.238.223.116:8092/v1/service/llm/v1",
+    api_key="test-token"
+)
+
+response = client.chat.completions.create(
+    model="Qwen/Qwen3-8B",
+    messages=[{"role": "user", "content": "Hello, world!"}]
+)
+print(response)
+```
+
+Congratulations! You have successfully spun up a multi-LLM serving cluster with OpenFabric, and sent requests to the cluster through the head node. You can now easily manage and scale your LLM serving infrastructure with OpenFabric, and serve various LLMs to your users seamlessly.
