@@ -3,10 +3,10 @@ package server
 import (
 	"context"
 	"net/http"
-	"opentela/internal/protocol"
-	solanaclient "opentela/internal/solana"
 	"opentela/internal/common"
 	"opentela/internal/common/process"
+	"opentela/internal/protocol"
+	solanaclient "opentela/internal/solana"
 	"opentela/internal/wallet"
 	"os/signal"
 	"syscall"
@@ -130,18 +130,21 @@ func StartServer() {
 			p2pGroup.PATCH("/:peerId/*path", P2PForwardHandler)
 			p2pGroup.POST("/:peerId/*path", P2PForwardHandler)
 			p2pGroup.GET("/:peerId/*path", P2PForwardHandler)
+			p2pGroup.DELETE("/:peerId/*path", P2PForwardHandler)
 		}
 		globalServiceGroup := v1.Group("/service")
 		{
 			globalServiceGroup.GET("/:service/*path", GlobalServiceForwardHandler)
 			globalServiceGroup.POST("/:service/*path", GlobalServiceForwardHandler)
 			globalServiceGroup.PATCH("/:service/*path", GlobalServiceForwardHandler)
+			globalServiceGroup.DELETE("/:service/*path", GlobalServiceForwardHandler)
 		}
 		serviceGroup := v1.Group("/_service")
 		{
 			serviceGroup.GET("/:service/*path", ServiceForwardHandler)
 			serviceGroup.POST("/:service/*path", ServiceForwardHandler)
 			serviceGroup.PATCH("/:service/*path", ServiceForwardHandler)
+			serviceGroup.DELETE("/:service/*path", ServiceForwardHandler)
 		}
 	}
 	p2plistener := P2PListener()

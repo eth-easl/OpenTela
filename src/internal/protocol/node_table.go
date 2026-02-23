@@ -150,17 +150,27 @@ func UpdateNodeTableHook(key ds.Key, value []byte) {
 	err := json.Unmarshal(value, &peer)
 	common.ReportError(err, "Error while unmarshalling peer")
 
-	// Check for Left status
+	// Check for Left status — keep the peer in the table marked as LEFT
+	// so TombstoneManager.collectCandidates can find it for deferred cleanup.
 	if peer.Status == LEFT {
-		common.Logger.Debugf("Peer [%s] has left, removing from table", peer.ID)
-		DeleteNodeTableHook(key)
+		common.Logger.Debugf("Peer [%s] has left, marking as LEFT in table", peer.ID)
+		tableUpdateSem <- struct{}{}
+		defer func() { <-tableUpdateSem }() // Release on exit
+		peer.Connected = false
+		if peer.LastSeen == 0 {
+			peer.LastSeen = time.Now().Unix()
+		}
+		table[key.String()] = peer
 		return
 	}
 
-	// Preserve locally computed connectivity status if we already know this peer
+	// A non-LEFT update: if this peer was previously LEFT, it has rejoined.
 	tableUpdateSem <- struct{}{}
 	defer func() { <-tableUpdateSem }() // Release on exit
 	if existing, ok := table[key.String()]; ok {
+		if existing.Status == LEFT {
+			common.Logger.Infof("Peer [%s] rejoined the network (was LEFT)", peer.ID)
+		}
 		// If LastSeen is missing in the update, keep the existing one
 		if peer.LastSeen == 0 {
 			peer.LastSeen = existing.LastSeen

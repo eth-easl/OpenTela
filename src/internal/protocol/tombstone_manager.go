@@ -46,6 +46,9 @@ func (tm *TombstoneManager) CleanupLeftNodes(ctx context.Context) (int, error) {
 			common.Logger.Errorf("Failed to delete left node %s: %v", key, err)
 		} else {
 			removedCount++
+			// Also remove from the in-memory table so a rejoining
+			// node with the same peer ID starts with a clean slate.
+			DeleteNodeTableHook(ds.NewKey(key))
 		}
 	}
 
