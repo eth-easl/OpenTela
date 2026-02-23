@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"math/rand"
-	"ocf/internal/common"
-	"ocf/internal/common/process"
+	"opentela/internal/common"
+	"opentela/internal/common/process"
 	"os"
 	"time"
 

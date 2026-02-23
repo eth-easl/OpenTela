@@ -114,11 +114,11 @@ post-build-release: ${POST_BUILD_RELEASE_TARGETS}
 build-release: build-release-deps pre-build-release
 build-release: ## Build binaries without debug information
 	@${MAKE} LDFLAGS="-w ${LDFLAGS}" GOARGS="${GOARGS} -trimpath" BUILD_DIR="${BUILD_DIR}/release" build
-	mv build/release/entry build/release/ocf-amd64
+	mv build/release/entry build/release/otela-amd64
 	@${MAKE} GOOS=linux GOARCH=arm64 LDFLAGS="-w ${LDFLAGS}" GOARGS="${GOARGS} -trimpath" BUILD_DIR="${BUILD_DIR}/release" build
-	mv build/release/entry build/release/ocf-arm64
+	mv build/release/entry build/release/otela-arm64
 	@echo "Build release complete. Built binaries:"
-	@ls -lh build/release/ocf-*
+	@ls -lh build/release/otela-*
 	@${MAKE} post-build-release
 
 

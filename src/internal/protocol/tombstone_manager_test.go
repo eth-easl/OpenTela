@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	crdt "ocf/internal/protocol/go-ds-crdt"
+	crdt "opentela/internal/protocol/go-ds-crdt"
 
 	cid "github.com/ipfs/go-cid"
 	ds "github.com/ipfs/go-datastore"

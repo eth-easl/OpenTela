@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"ocf/internal/common"
-	"ocf/internal/platform"
+	"opentela/internal/common"
+	"opentela/internal/platform"
 	"sync"
 	"time"
 

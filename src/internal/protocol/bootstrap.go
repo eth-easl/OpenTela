@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"ocf/internal/common"
+	"opentela/internal/common"
 	"strings"
 
 	"github.com/multiformats/go-multiaddr"

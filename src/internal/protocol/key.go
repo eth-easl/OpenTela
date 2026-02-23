@@ -2,7 +2,7 @@ package protocol
 
 import (
 	"fmt"
-	"ocf/internal/common"
+	"opentela/internal/common"
 	"os"
 	"path"
 

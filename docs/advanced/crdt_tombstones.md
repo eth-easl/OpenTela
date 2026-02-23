@@ -7,7 +7,7 @@ tldr: "Introduced an explicit 'StatusLeft' and Tombstone Manager to reliably han
 # CRDT Refactoring: Tombstone Mechanism for Node Departure
 
 ## Overview
-The OpenFabric P2P network relies on a CRDT-based Node Table to track peers. Previously, when a node left the network, it would simply attempt to delete its key from the CRDT. However, due to the nature of CRDTs and eventual consistency, these deletions were not always propagated effectively, leading to "ghost peers" that remained in the table indefinitely.
+The OpenTela P2P network relies on a CRDT-based Node Table to track peers. Previously, when a node left the network, it would simply attempt to delete its key from the CRDT. However, due to the nature of CRDTs and eventual consistency, these deletions were not always propagated effectively, leading to "ghost peers" that remained in the table indefinitely.
 
 ## Problem
 1.  **Ghost Peers**: Nodes that left were sometimes re-added by other peers who hadn't seen the delete operation yet, or the delete operation was lost/overridden by an older update.

@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"ocf/internal/common"
+	"opentela/internal/common"
 	"sync"
 	"sync/atomic"
 	"time"

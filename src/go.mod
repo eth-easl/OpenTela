@@ -1,4 +1,4 @@
-module ocf
+module opentela
 
 go 1.25.0
 

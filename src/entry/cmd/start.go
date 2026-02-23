@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	"ocf/internal/common"
-	"ocf/internal/protocol"
-	"ocf/internal/server"
+	"opentela/internal/common"
+	"opentela/internal/protocol"
+	"opentela/internal/server"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

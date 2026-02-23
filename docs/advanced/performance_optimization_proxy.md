@@ -7,7 +7,7 @@ tldr: "Introduced request streaming and connection pooling to the P2P proxy, red
 # Performance Optimization: Proxy Request Handling
 
 ## Overview
-As part of the performance review for the OpenFabric `src/internal/server` component, critical bottlenecks were identified in how the server handled forwarded requests:
+As part of the performance review for the OpenTela `src/internal/server` component, critical bottlenecks were identified in how the server handled forwarded requests:
 1.  **Unbounded Memory Growth**: The server read the entire request body into memory before forwarding, causing O(N) memory usage where N is the payload size.
 2.  **Connection Churn**: A new `http.Transport` was created for every request, preventing TCP connection reuse and increasing latency due to repeated handshakes.
 

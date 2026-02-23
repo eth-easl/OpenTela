@@ -1,7 +1,7 @@
 package platform
 
 import (
-	"ocf/internal/common"
+	"opentela/internal/common"
 	"os/exec"
 	"strconv"
 	"strings"

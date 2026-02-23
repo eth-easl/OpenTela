@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"ocf/internal/common"
+	"opentela/internal/common"
 	"strings"
 
 	ds "github.com/ipfs/go-datastore"

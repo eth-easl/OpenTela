@@ -3,11 +3,11 @@ package server
 import (
 	"context"
 	"net/http"
-	"ocf/internal/common"
-	"ocf/internal/common/process"
-	"ocf/internal/protocol"
-	solanaclient "ocf/internal/solana"
-	"ocf/internal/wallet"
+	"opentela/internal/protocol"
+	solanaclient "opentela/internal/solana"
+	"opentela/internal/common"
+	"opentela/internal/common/process"
+	"opentela/internal/wallet"
 	"os/signal"
 	"syscall"
 	"time"
@@ -103,7 +103,7 @@ func StartServer() {
 			"openapiUrl": "/openapi.yaml",
 		})
 	})
-	
+
 	// Prometheus metrics
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 

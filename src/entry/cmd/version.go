@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"ocf/internal/common"
+	"opentela/internal/common"
 
 	"github.com/spf13/cobra"
 )

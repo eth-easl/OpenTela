@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"log"
-	"ocf/internal/common"
+	"opentela/internal/common"
 	"os"
 	"sync"
 
