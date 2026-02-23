@@ -129,7 +129,7 @@ A request with `"model": "Llama-3-70B"` and `X-Otela-Fallback: 2` does not match
 
 This is the primary endpoint for users. It routes the request to a suitable worker based on service name and identity group matching.
 
-**Supported methods**: `GET`, `POST`, `PATCH`
+**Supported methods**: `GET`, `POST`, `PATCH`, `DELETE`
 
 **URL parameters**:
 
@@ -190,7 +190,7 @@ print(response.json())
 
 Forwards the request directly to a specific peer by its Peer ID, bypassing identity group matching entirely. Useful for debugging or when you want deterministic routing.
 
-**Supported methods**: `GET`, `POST`, `PATCH`
+**Supported methods**: `GET`, `POST`, `PATCH`, `DELETE`
 
 **URL parameters**:
 
@@ -222,7 +222,7 @@ This is an **internal** endpoint. When a worker node receives a forwarded reques
 
 You generally don't call this directly from outside the cluster. It is automatically invoked as part of the two-hop forwarding chain described above.
 
-**Supported methods**: `GET`, `POST`, `PATCH`
+**Supported methods**: `GET`, `POST`, `PATCH`, `DELETE`
 
 ## Configuring identity groups
 
