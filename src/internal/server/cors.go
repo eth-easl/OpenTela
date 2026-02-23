@@ -2,7 +2,7 @@ package server
 
 import (
 	"net/http"
-	"ocf/internal/common"
+	"opentela/internal/common"
 
 	"github.com/gin-gonic/gin"
 )

@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"ocf/internal/common"
-	crdt "ocf/internal/protocol/go-ds-crdt"
+	"opentela/internal/common"
+	crdt "opentela/internal/protocol/go-ds-crdt"
 
 	"github.com/spf13/viper"
 )

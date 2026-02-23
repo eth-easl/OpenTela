@@ -10,7 +10,7 @@ import (
 
 func TestVersionCommandProperties(t *testing.T) {
 	assert.Equal(t, "version", versionCmd.Use)
-	assert.Equal(t, "Print the version of ocfcore", versionCmd.Short)
+	assert.Equal(t, "Print the version of OpenTela", versionCmd.Short)
 	assert.NotNil(t, versionCmd.Run)
 }
 

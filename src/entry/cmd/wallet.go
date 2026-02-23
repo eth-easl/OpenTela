@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"ocf/internal/wallet"
+	"opentela/internal/wallet"
 	"time"
 
 	"github.com/spf13/cobra"

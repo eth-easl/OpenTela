@@ -1,15 +1,15 @@
-# Spin up multi-LLMs serving with OpenFabric
+# Spin up multi-LLMs serving with OpenTela
 
-OpenFabric helps you connect GPU resources into a single pool, so that you can easily coordinate and manage them. This document explains how to spin up a cluster of multiple LLMs serving with OpenFabric.
+OpenTela helps you connect GPU resources into a single pool, so that you can easily coordinate and manage them. This document explains how to spin up a cluster of multiple LLMs serving with OpenTela.
 
 ## Step 1: Spin up the first node (head node)
 
 The first node, or we call it the head node, is a standalone node that serves as the main entry point for your cluster. This node should be a node where your users can access and send requests to (for example, with a public IP address). It does not need to be a powerful machine nor have a GPU.
 
-Once you have OpenFabric installed, you can spin up the head node with the following command:
+Once you have OpenTela installed, you can spin up the head node with the following command:
 
 ```bash
-./ocf start --mode standalone --public-addr {YOUR_IP_ADDR} --seed 0
+./otela start --mode standalone --public-addr {YOUR_IP_ADDR} --seed 0
 ```
 
 In the above command:
@@ -72,20 +72,20 @@ As you can see, there is only one node in the cluster now, which is the head nod
 
 ## Step 2: Spin up the second node (worker node)
 
-The second node, or we call it the `worker node`, is a node that connects to the head node and serves as a worker in your cluster. This node should be a machine with GPU resources, so it can serve LLMs and handle requests from users. We use vLLM as an example of the LLM serving framework (and assume that you have already installed it according to [vLLM docs](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/#requirements), and that you have `vllm` command ready in your $PATH). Once you have OpenFabric and vLLM installed, you can spin up the worker node and connect it to the head node with the following command:
+The second node, or we call it the `worker node`, is a node that connects to the head node and serves as a worker in your cluster. This node should be a machine with GPU resources, so it can serve LLMs and handle requests from users. We use vLLM as an example of the LLM serving framework (and assume that you have already installed it according to [vLLM docs](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/#requirements), and that you have `vllm` command ready in your $PATH). Once you have OpenTela and vLLM installed, you can spin up the worker node and connect it to the head node with the following command:
 
 ```bash
-./ocf start --bootstrap.addr /ip4/{YOUR_IP_ADDR}/tcp/43905/p2p/{YOUR_HEAD_NODE_PEER_ID} --subprocess "vllm serve Qwen/Qwen3-8B --max_model_len 16384 --port 8080" --service.name llm --service.port 8080 --seed 1
+./otela start --bootstrap.addr /ip4/{YOUR_IP_ADDR}/tcp/43905/p2p/{YOUR_HEAD_NODE_PEER_ID} --subprocess "vllm serve Qwen/Qwen3-8B --max_model_len 16384 --port 8080" --service.name llm --service.port 8080 --seed 1
 ```
 
 In the above command:
 - `--bootstrap.addr /ip4/{YOUR_IP_ADDR}/tcp/43905/p2p/{YOUR_HEAD_NODE_PEER_ID}` specifies the address of the head node to connect to. You should replace `{YOUR_IP_ADDR}` with the actual public IP address of your head node, and replace `{YOUR_HEAD_NODE_PEER_ID}` with the actual peer ID of your head node (which you can find in the logs of your head node).
 - `--subprocess "vllm serve Qwen/Qwen3-8B --max_model_len 16384 --port 8080"` specifies the command to start the LLM serving subprocess. In this example, we use vLLM to serve the Qwen3-8B model, with a maximum model length of 16384 tokens, and listen on port 8080. You can replace this command with any other command to serve your desired LLM, as long as it listens on a specific port for incoming requests.
-- `--service.name llm` specifies the name of the service provided by this node, which is `llm` in this case. For LLM serving purpose, please do not modify/remove this flag, as OpenFabric will use this information to route requests to the correct nodes.
+- `--service.name llm` specifies the name of the service provided by this node, which is `llm` in this case. For LLM serving purpose, please do not modify/remove this flag, as OpenTela will use this information to route requests to the correct nodes.
 - `--service.port 8080` specifies the port number of the service provided by this node, which is 8080 in this case. This should be the same port number as the one used in the subprocess command.
 - `--seed 1` sets the random seed to 1, so that this worker node will randomly generate a different peer ID from the head node. You can also set it to any other number, or even remove this flag to have a random seed, as long as the peer ID of this worker node is different from the head node.
 
-Once you run the above command, OpenFabric will start the subprocess to serve the LLM, and connect this worker node to the head node. 
+Once you run the above command, OpenTela will start the subprocess to serve the LLM, and connect this worker node to the head node. 
 
 ```bash
 ...
@@ -180,7 +180,7 @@ You can spin up more worker nodes with the same command as in Step 2 with variou
 
 ## Step 3: Send requests to the cluster
 
-Once you have the cluster of LLM serving nodes up and running, you can send requests to the cluster through the head node, and OpenFabric will route the requests to the appropriate worker nodes based on the service information (particularly `identity_group`) registered by each node.
+Once you have the cluster of LLM serving nodes up and running, you can send requests to the cluster through the head node, and OpenTela will route the requests to the appropriate worker nodes based on the service information (particularly `identity_group`) registered by each node.
 
 For example, if you want to send a request to the LLM service to generate text with the Qwen3-8B model above, you can send a request to the head node at `http://{YOUR_IP_ADDR}:8092/v1/` with the following JSON body:
 
@@ -201,13 +201,13 @@ response = requests.post(
 print(response.json())
 ```
 
-In the above code, you should replace `{YOUR_HEAD_NODE_IP_ADDR}` with the actual IP address of your head node. The request is sent to the head node's API endpoint for the `llm` service, and it includes the model information in the JSON body. OpenFabric will route this request to the worker node that serves the Qwen3-8B model (using the `identity_group` information), and you should get a response from the vLLM API server with the generated text.
+In the above code, you should replace `{YOUR_HEAD_NODE_IP_ADDR}` with the actual IP address of your head node. The request is sent to the head node's API endpoint for the `llm` service, and it includes the model information in the JSON body. OpenTela will route this request to the worker node that serves the Qwen3-8B model (using the `identity_group` information), and you should get a response from the vLLM API server with the generated text.
 
 ```json
 {"id": "chatcmpl-8a81b873db0141cd901821fef0a902c0", "object": "chat.completion", "created": 1771766516, "model": "Qwen/Qwen3-8B", "choices": [{"index": 0, "message": {"role": "assistant", "content": "<think>\nOkay, the user said "Hello, world!" so they\"re probably just testing the waters or starting a conversation. I need to respond in a friendly and welcoming manner. Let me make sure to acknowledge their greeting and invite them to ask questions or share more. I should keep it simple and positive. Maybe add an emoji to keep it light. Let me check if there\"s anything else they might need. No, just a standard response should work here.\n</think>\n\nHello! 😊 How can I assist you today? Whether you have questions, need help with something, or just want to chat, I\"m here for you!", "refusal": None, "annotations": None, "audio": None, "function_call": None, "tool_calls": [], "reasoning_content": None}, "logprobs": None, "finish_reason": "stop", "stop_reason": None}], "service_tier": None, "system_fingerprint": None, "usage": {"prompt_tokens": 12, "total_tokens": 141, "completion_tokens": 129, "prompt_tokens_details": None}, "prompt_logprobs": None, "kv_transfer_params": None}
 ```
 
-If you desire to send the requests to a particular worker node instead of leveraging the built-in routing logic of OpenFabric, you can also send the request directly to the worker node's API endpoint, through the head node as a proxy. For example, in the above cluster setup, you can force OpenFabric to route the request the worker node with the code below:
+If you desire to send the requests to a particular worker node instead of leveraging the built-in routing logic of OpenTela, you can also send the request directly to the worker node's API endpoint, through the head node as a proxy. For example, in the above cluster setup, you can force OpenTela to route the request the worker node with the code below:
 
 ```python
 import requests
@@ -225,7 +225,7 @@ response = requests.post(
 print(response.json())
 ```
 
-As long as the serving engine (e.g., `vLLM` or `SGLang`) is compatible with OpenAI protocol (e.g., has `/completions` and/or `/chat/completions` endpoint), OpenFabric is compatible with it as well and can be used with any OpenAI-compatible client. For example, you can also use `openai` python package to send requests to the cluster like this:
+As long as the serving engine (e.g., `vLLM` or `SGLang`) is compatible with OpenAI protocol (e.g., has `/completions` and/or `/chat/completions` endpoint), OpenTela is compatible with it as well and can be used with any OpenAI-compatible client. For example, you can also use `openai` python package to send requests to the cluster like this:
 
 ```python
 import openai
@@ -241,4 +241,4 @@ response = client.chat.completions.create(
 print(response)
 ```
 
-Congratulations! You have successfully spun up a multi-LLM serving cluster with OpenFabric, and sent requests to the cluster through the head node. You can now easily manage and scale your LLM serving infrastructure with OpenFabric, and serve various LLMs to your users seamlessly.
+Congratulations! You have successfully spun up a multi-LLM serving cluster with OpenTela, and sent requests to the cluster through the head node. You can now easily manage and scale your LLM serving infrastructure with OpenTela, and serve various LLMs to your users seamlessly.

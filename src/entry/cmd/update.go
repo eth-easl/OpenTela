@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/http"
-	"ocf/internal/common"
+	"opentela/internal/common"
 	"runtime"
 
 	"github.com/minio/selfupdate"
@@ -13,7 +13,7 @@ import (
 func doUpdate() error {
 	// detect cpu arch
 	arch := runtime.GOARCH
-	url := "https://github.com/eth-easl/OpenFabric/releases/latest/download/ocf-" + arch
+	url := "https://github.com/eth-easl/OpenTela/releases/latest/download/otela-" + arch
 	common.Logger.Info("Downloading from ", url)
 	resp, err := http.Get(url)
 	if err != nil {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"ocf/internal/common"
-	"ocf/internal/platform"
-	"ocf/internal/wallet"
+	"opentela/internal/common"
+	"opentela/internal/platform"
+	"opentela/internal/wallet"
 	"sync"
 	"time"
 

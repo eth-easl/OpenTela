@@ -13,10 +13,10 @@ import (
 
 func TestRootCommand(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		expect   string
-		wantErr  bool
+		name    string
+		args    []string
+		expect  string
+		wantErr bool
 	}{
 		{
 			name:    "no arguments shows help",
@@ -51,8 +51,8 @@ func TestRootCommand(t *testing.T) {
 }
 
 func TestRootCommandProperties(t *testing.T) {
-	assert.Equal(t, "ocfcore", rootcmd.Use)
-	assert.Equal(t, "ocfcore", rootcmd.Short)
+	assert.Equal(t, "otela", rootcmd.Use)
+	assert.Equal(t, "OpenTela is a decentralized fabric for running machine learning applications.", rootcmd.Short)
 	assert.Empty(t, rootcmd.Long)
 	assert.NotNil(t, rootcmd.PersistentPreRunE)
 	assert.NotNil(t, rootcmd.Run)
@@ -191,10 +191,10 @@ func TestInitConfigFlagBinding(t *testing.T) {
 
 func TestExecute(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		setup    func()
-		wantErr  bool
+		name    string
+		args    []string
+		setup   func()
+		wantErr bool
 	}{
 		{
 			name:    "execute with no args",

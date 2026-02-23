@@ -1,7 +1,7 @@
 package server
 
 import (
-	"ocf/internal/protocol"
+	"opentela/internal/protocol"
 	"time"
 
 	"github.com/axiomhq/axiom-go/axiom"

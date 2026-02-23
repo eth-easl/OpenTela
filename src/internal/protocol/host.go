@@ -10,7 +10,7 @@ import (
 	"errors"
 	mrand "math/rand"
 	"net"
-	"ocf/internal/common"
+	"opentela/internal/common"
 	"os"
 	"strconv"
 	"sync"

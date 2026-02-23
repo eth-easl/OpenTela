@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"ocf/internal/common"
+	"opentela/internal/common"
 	"strings"
 	"sync"
 	"time"
 
-	crdt "ocf/internal/protocol/go-ds-crdt"
+	crdt "opentela/internal/protocol/go-ds-crdt"
 
 	ipfslite "github.com/hsanjuan/ipfs-lite"
 	ds "github.com/ipfs/go-datastore"

@@ -2,7 +2,7 @@ package server
 
 import (
 	"net"
-	"ocf/internal/protocol"
+	"opentela/internal/protocol"
 
 	gostream "github.com/libp2p/go-libp2p-gostream"
 	p2phttp "github.com/libp2p/go-libp2p-http"
