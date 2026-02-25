@@ -129,6 +129,7 @@ func StartServer() {
 		{
 			p2pGroup.PATCH("/:peerId/*path", P2PForwardHandler)
 			p2pGroup.POST("/:peerId/*path", P2PForwardHandler)
+			p2pGroup.PUT("/:peerId/*path", P2PForwardHandler)
 			p2pGroup.GET("/:peerId/*path", P2PForwardHandler)
 			p2pGroup.DELETE("/:peerId/*path", P2PForwardHandler)
 		}
@@ -136,6 +137,7 @@ func StartServer() {
 		{
 			globalServiceGroup.GET("/:service/*path", GlobalServiceForwardHandler)
 			globalServiceGroup.POST("/:service/*path", GlobalServiceForwardHandler)
+			globalServiceGroup.PUT("/:service/*path", GlobalServiceForwardHandler)
 			globalServiceGroup.PATCH("/:service/*path", GlobalServiceForwardHandler)
 			globalServiceGroup.DELETE("/:service/*path", GlobalServiceForwardHandler)
 		}
@@ -143,6 +145,7 @@ func StartServer() {
 		{
 			serviceGroup.GET("/:service/*path", ServiceForwardHandler)
 			serviceGroup.POST("/:service/*path", ServiceForwardHandler)
+			serviceGroup.PUT("/:service/*path", ServiceForwardHandler)
 			serviceGroup.PATCH("/:service/*path", ServiceForwardHandler)
 			serviceGroup.DELETE("/:service/*path", ServiceForwardHandler)
 		}
