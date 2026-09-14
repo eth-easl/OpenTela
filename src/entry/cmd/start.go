@@ -14,6 +14,11 @@ var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start listening for incoming connections",
 	Run: func(cmd *cobra.Command, args []string) {
+		// Reconcile with the operator's cloud account before anything starts:
+		// ensure a live session, verify wallet linkage, surface billing state.
+		// Best-effort; see bootAccount.
+		bootAccount(cmd)
+
 		component := viper.GetString("component")
 
 		if component == "ingress" {

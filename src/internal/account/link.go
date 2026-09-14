@@ -80,17 +80,24 @@ func (c *Client) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
-func (c *Client) doJSON(ctx context.Context, path string, req, out any) error {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("encode request: %w", err)
+// doJSON sends an authenticated JSON request and decodes the JSON reply. req
+// may be nil for body-less GETs; it is JSON-encoded otherwise.
+func (c *Client) doJSON(ctx context.Context, method, path string, req, out any) error {
+	var body io.Reader
+	if req != nil {
+		encoded, err := json.Marshal(req)
+		if err != nil {
+			return fmt.Errorf("encode request: %w", err)
+		}
+		body = bytes.NewReader(encoded)
 	}
-	httpReq, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	if req != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
 	if c.Bearer != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.Bearer)
 	}
@@ -130,7 +137,7 @@ func (c *Client) LinkWallet(
 	ctx context.Context, walletPubkey string, privKey ed25519.PrivateKey,
 ) (*LinkedWallet, error) {
 	var challenge challengeResponse
-	if err := c.doJSON(ctx, "/manage/wallets/challenges",
+	if err := c.doJSON(ctx, http.MethodPost, "/manage/wallets/challenges",
 		map[string]string{"wallet": walletPubkey}, &challenge); err != nil {
 		return nil, err
 	}
@@ -143,7 +150,7 @@ func (c *Client) LinkWallet(
 	sig := base58.Encode(ed25519.Sign(privKey, []byte(challenge.Message)))
 
 	var linked LinkedWallet
-	if err := c.doJSON(ctx, "/manage/wallets",
+	if err := c.doJSON(ctx, http.MethodPost, "/manage/wallets",
 		map[string]string{"challenge_id": challenge.ID, "signature": sig},
 		&linked); err != nil {
 		return nil, err
