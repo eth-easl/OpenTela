@@ -1,262 +1,119 @@
 ---
-title: Solana Settlement
-description: Configure and operate automated usage billing and SPL token settlement between consumers and providers.
-experimental: true
+title: Billing & Settlement
+description: How OpenTela billing works — seller asks, buyer credit, per-request caps, and settlement through the API market's billing gateway.
 ---
 
-OpenTela can automatically settle usage bills between consumers and providers using the **OTELA** SPL token on Solana. When a head node dispatches requests to worker nodes, both sides independently track usage metrics (tokens generated, GPU milliseconds consumed, etc.). Once usage crosses a configurable threshold, the head node reconciles the measurements, calculates the amount owed, and submits an SPL token transfer on-chain.
+OpenTela has a **single billing rail: the API market** (the billing gateway at
+`api.opentela.ai`). Sellers publish their minimum fee as **asks**, buyers fund a
+**credit account** and cap spend **per request**, and the gateway meters actual
+usage and settles against the buyer's credit. There is no peer-to-peer payment
+path: nodes never sign transfers to each other.
 
-This document explains how to configure and operate the settlement system.
+<Callout type="warn" title="The legacy direct-transfer settlement was removed">
 
-<Callout type="warn" title="Two independent billing models — do not mix them on the same traffic">
-
-OpenTela currently ships **two separate billing systems**:
-
-1. **Legacy peer-to-peer settlement (this document)** — configured with
-   `rates.yaml`, priced **per 1,000 units**, settled by **direct SPL
-   transfers** between buyer and seller wallets, reconciled over CRDT. No
-   central service is involved.
-2. **The API market (api.opentela.ai billing gateway)** — sellers publish
-   **asks priced per million units** (`askpublish`), buyers hold **credit
-   accounts** and cap spend with per-request max-fee headers, and the
-   gateway settles through its own treasury and ledger.
-
-These models share no state: a peer priced in `rates.yaml` is invisible to
-the gateway's market, and gateway-billed traffic never triggers this
-document's CRDT settlement. Running both against the same traffic route
-**double-bills buyers** (once via direct SPL transfer, once via gateway
-credit). Deploy exactly one model per traffic path:
-
-- Pure mesh (head + workers you run, no gateway) → this document.
-- Traffic through `api.opentela.ai` → the gateway's billing configuration;
-  leave the settlement settings below **disabled** on those heads.
-
-A unified settlement design (non-custodial, delegated spending) is tracked
-in the gateway repo's `docs/billing-design.md` §11.
+Earlier versions of this document described a peer-to-peer settlement system
+(`rates.yaml` with `price_per_1000` rates, head/worker CRDT reconciliation, and
+head-signed SPL transfers between consumer and provider wallets). That rail was
+**removed** — `billing.enabled` / `OF_BILLING_ENABLED` now fails fast at startup
+with a pointer here. If you are migrating an old deployment: delete the
+`billing:` and `rates:` blocks from `cfg.yaml`, and move to the market flow
+below. Running both rails on the same traffic double-billed buyers, which is
+why the old path was retired rather than kept alongside.
 
 </Callout>
 
-## Overview
-
-The settlement flow works as follows:
-
-1. A **consumer** sends requests through a head node to one or more **provider** worker nodes.
-2. Both the head node and worker node independently extract usage metrics from HTTP response headers (`X-Usage-Tokens`, `X-Usage-GPU-Ms`, etc.).
-3. Usage records accumulate locally until a threshold is reached (value or time).
-4. The head node reconciles its measurements against the worker's via CRDT-shared aggregates.
-5. If both sides agree (within a configurable tolerance), the head node looks up the provider's rate, calculates the payment, and submits an SPL token transfer to the provider's wallet.
-6. The transaction is confirmed on-chain, and a payment record is stored in the CRDT to prevent duplicate billing.
+## The market model
 
 ```
-Consumer Wallet ──(OTELA tokens)──> Provider Wallet
-        ↑                              ↑
-        │                              │
-    Head Node (Payment Processor)
-        │
-    ┌───┴────┐
-    │ 1. Aggregate Usage
-    │ 2. Reconcile (head vs worker)
-    │ 3. Lookup Provider Rate
-    │ 4. Calculate Amount
-    │ 5. Build SPL Transfer Tx
-    │ 6. Sign with Consumer Key
-    │ 7. Submit to Solana
-    └──────────────────────────
+Seller (worker node)                     Buyer (head node)
+────────────────────                     ──────────────────
+publishes asks            ── market ──>  resolves live asks +
+(askpublish, every 2m)     price book    affordable peers
+                                         (X-Otela-Allowed-Peers)
+       ▲                                        │
+       │ withdraw earnings                      │ forwards request
+       │ (POST /manage/billing/withdrawals)     ▼
+       │                                 gateway meters usage and
+  ┌───────────────────────────────────────────────────────┐
+  │ billing gateway (api.opentela.ai)                     │
+  │ reserve → meter → settle against buyer credit         │
+  └───────────────────────────────────────────────────────┘
 ```
 
-## Prerequisites
+1. **Sellers set their minimum fee.** Each provider publishes per-million-token
+   asks (input / cached-input / output) with the reference ask-publisher:
 
-- OpenTela binary installed (see [Installation](/docs/tutorial/installation))
-- A Solana wallet with OTELA tokens (see [Wallet & Ownership](/docs/tutorial/owner))
-- The provider (worker node) must also have a Solana wallet
-- Access to a Solana RPC endpoint (mainnet, devnet, or testnet)
+   ```bash
+   askpublish \
+     -api https://api.opentela.ai \
+     -control-token "$INTERNAL_CONTROL_TOKEN" \
+     -peer-key-file ~/.opentela/identity.key \
+     -asks asks.json
+   ```
 
-## Step 1: Enable billing
+   Asks carry a server-assigned 5-minute TTL; the republish loop (default 2m)
+   keeps them live. See
+   [ask publication](https://github.com/opentela-ai/api.opentela.ai#seller-ask-publication-askpublish)
+   for the asks file format.
 
-Edit `~/.config/opentela/cfg.yaml` on the **head node** to enable the billing system:
+2. **Buyers fund credit.** Credit is backed by OTELA deposits into the
+   treasury. Acquire OTELA, then top up from the
+   [tokens dApp](https://github.com/opentela-ai/tokens-program) billing tab
+   (a wallet → treasury transfer the deposit watcher credits) or via
+   `POST /manage/billing/topup`.
 
-```yaml
-billing:
-  enabled: true
-  value_threshold: 10000000    # trigger settlement after this many usage units
-  max_interval_minutes: 60     # or after this many minutes, whichever comes first
-  dispute_threshold_pct: 10    # flag if head/worker measurements differ by >10%
-```
+3. **Buyers cap spend per request.** Account-level caps are managed on the
+   wallet page (`PATCH /manage/billing/preferences`); a caller can additionally
+   cap any single request with the max-fee headers:
 
-You can also enable billing via environment variable:
+   ```
+   X-Max-Input-Price-Per-Million: 100
+   X-Max-Cached-Input-Price-Per-Million: 50
+   X-Max-Output-Price-Per-Million: 200
+   ```
 
-```bash
-export OF_BILLING_ENABLED=true
-```
+   A peer whose live ask exceeds a capped dimension is excluded from that
+   request's affordable set. See
+   [frontend integration](https://github.com/opentela-ai/api.opentela.ai/blob/main/docs/frontend-integration.md)
+   for the full header semantics.
 
-| Config key | Env var | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `billing.enabled` | `OF_BILLING_ENABLED` | `false` | Enable the settlement system |
-| `billing.value_threshold` | `OF_BILLING_VALUE_THRESHOLD` | `10000000` | Usage value that triggers a settlement |
-| `billing.max_interval_minutes` | `OF_BILLING_MAX_INTERVAL_MINUTES` | `60` | Maximum time between settlements |
-| `billing.dispute_threshold_pct` | `OF_BILLING_DISPUTE_THRESHOLD_PCT` | `10` | Percentage difference that flags a dispute |
+4. **The gateway meters and settles.** For each served request the gateway
+   reserves conservatively, meters actual usage, and settles the exact amount
+   against the buyer's credit ledger, crediting the seller's account. Sellers
+   withdraw earnings via the manage API.
 
-## Step 2: Configure the OTELA token and Solana RPC
+## Price-aware routing
 
-The settlement system uses the SPL token mint configured under `solana.mint`. The default points to the OTELA token:
+The gateway stamps the cheapest affordable peers (cheapest-first) into
+`X-Otela-Allowed-Peers` on every forwarded request. The mesh head consumes that
+order: with `routing.price_weight_decay` set (env
+`OF_ROUTING_PRICE_WEIGHT_DECAY`), selection is weighted toward the cheapest
+affordable peers, and retries deterministically prefer the next-cheapest
+allowed peer. See [Routing](/docs/tutorial/routing).
 
-```yaml
-solana:
-  rpc: "https://api.mainnet-beta.solana.com"   # or https://api.devnet.solana.com for testing
-  mint: "EsmcTrdLkFqV3mv4CjLF3AmCx132ixfFSYYRWD78cDzR"  # OTELA SPL token mint
-  skip_verification: false
-```
+## Local usage tracking (observability)
 
-For testing, use the devnet endpoint. For production, use a mainnet-beta endpoint or a dedicated RPC provider.
-
-## Step 4: Set up provider rates
-
-Providers set their own prices per service and metric. Rates are loaded from a YAML file:
-
-```yaml
-# ~/.config/opentela/rates.yaml (or wherever rates.config_path points)
-providers:
-  - address: "ProviderSolanaAddress1"
-    services:
-      - name: "llm"
-        metrics:
-          - name: "tokens"
-            price_per_1000: 1000    # 1000 base units per 1000 tokens
-          - name: "gpu_ms"
-            price_per_1000: 500     # 500 base units per 1000 ms of GPU time
-```
-
-Point the config to this file:
-
-```yaml
-rates:
-  default_per_1000_tokens: 1000  # fallback if provider has no explicit rate
-  default_per_gpu_ms: 1          # fallback for GPU time
-  config_path: "/home/user/.config/opentela/rates.yaml"
-```
-
-If a provider has no explicit rate configured, the system falls back to the `default_per_1000_tokens` or `default_per_gpu_ms` values.
-
-## Step 5: Fund the consumer wallet
-
-The head node's wallet (the consumer) needs OTELA tokens to pay providers. Check the balance:
-
-```bash
-./otela balance
-```
-
-```
-Wallet: 5YNmS1R9nNSCDzb5a7mMJ1dwK9uHeAAF4CerBTpfXoA4
-RPC:    https://api.devnet.solana.com
-
-  SOL balance:   1.500000000 SOL
-  OTELA balance: 50000 OTELA
-  OTELA raw:     50000000000000 base units
-  OTELA mint:    EsmcTrdLkFqV3mv4CjLF3AmCx132ixfFSYYRWD78cDzR
-```
-
-The consumer wallet also needs a small amount of SOL for transaction fees (~0.000005 SOL per transfer) and potentially for creating Associated Token Accounts (~0.002 SOL per new provider).
-
-For devnet testing, you can request SOL from the faucet:
-
-```bash
-./otela wallet airdrop --solana.rpc https://api.devnet.solana.com 2
-```
-
-## Step 6: Start the nodes
-
-Start the head node with billing enabled:
-
-```bash
-./otela start --mode standalone --public-addr {YOUR_IP} --seed 0
-```
-
-Start worker nodes as usual (see [Spin Up](/docs/tutorial/spinup)). The billing system operates transparently — worker nodes do not need any special configuration beyond having a wallet.
-
-Once requests flow through the network, you will see settlement logs on the head node:
-
-```
-INFO  settlement: payment confirmed sig=3Kf8x... amount=5000 to=ProviderAddress...
-```
-
----
-
-## How usage tracking works
-
-Services report usage through HTTP response headers. When a worker node proxies a request to a local service (e.g., vLLM), OpenTela reads the response headers:
+Worker services report usage through response headers:
 
 ```
 X-Usage-Tokens: 1234
 X-Usage-GPU-Ms: 5000
 ```
 
-Both the head node (which receives the proxied response) and the worker node (which made the local request) independently extract and store these metrics. This dual-attestation design ensures neither side can unilaterally inflate or deflate usage.
+The head extracts these (`X-Usage-*`) and keeps local per-request records
+(Badger-backed, keyed by request ID). **These records do not move money** —
+they are the node's local accounting trail for observability and dispute
+evidence. The authoritative meter and settlement live in the billing gateway.
 
-### Aggregation
+## Where things live
 
-Usage records accumulate in local buckets keyed by `(peer_id, service, metric_name)`. A settlement is triggered when either condition is met:
-
-- The accumulated value exceeds `billing.value_threshold`
-- The time since the last settlement exceeds `billing.max_interval_minutes`
-
-### Reconciliation
-
-Before payment, the head node's aggregate is compared with the worker node's aggregate (shared via CRDT). If the measurements differ by more than `billing.dispute_threshold_pct`, the record is flagged as **disputed** and no payment is made. Disputed records are logged for manual review.
-
-If the difference is within tolerance, the resolved value is the average of both measurements.
-
----
-
-## Error handling
-
-The settlement system handles common failure scenarios:
-
-| Scenario | Behavior |
-|----------|----------|
-| Insufficient OTELA balance | Pre-flight check fails, no transactions submitted |
-| Provider has no token account | ATA created automatically (costs ~0.002 SOL) |
-| Transaction fails on-chain | Retried up to 3 times with exponential backoff |
-| Transaction not confirmed | Polls for up to 60 seconds before timing out |
-| Disputed usage (>threshold) | Skipped, logged for review |
-| Provider rate not found | Falls back to default platform rate |
-
-### Idempotency
-
-Payment records are stored by transaction signature in the CRDT under `/billing/payments/{signature}`. Before submitting a new payment, the system checks for existing records to prevent double-billing.
-
----
-
-## Testing on devnet
-
-For end-to-end testing without real funds:
-
-1. Point `solana.rpc` to `https://api.devnet.solana.com`
-2. Request SOL from the faucet: `./otela wallet airdrop 2`
-3. Deploy or use an existing test SPL token on devnet
-4. Update `solana.mint` to the test token's mint
-5. Start the cluster and send requests — settlements will appear in the logs
-
----
-
-## Full configuration reference
-
-```yaml
-# Billing and settlement
-billing:
-  enabled: true
-  value_threshold: 10000000
-  max_interval_minutes: 60
-  dispute_threshold_pct: 10
-
-# Solana connection and token
-solana:
-  rpc: "https://api.devnet.solana.com"
-  mint: "EsmcTrdLkFqV3mv4CjLF3AmCx132ixfFSYYRWD78cDzR"
-  skip_verification: false
-
-# Provider rates
-rates:
-  default_per_1000_tokens: 1000
-  default_per_gpu_ms: 1
-  config_path: "/etc/opentela/rates.yaml"
-```
+| Concern | Where |
+| :--- | :--- |
+| Publish / update asks | `askpublish` → `POST /internal/pricing` (5-min TTL) |
+| Fund credit | tokens dApp billing tab or `POST /manage/billing/topup` |
+| Per-request caps | `X-Max-*-Price-Per-Million` headers |
+| Account caps | `PATCH /manage/billing/preferences` |
+| Balance & usage history | `GET /manage/billing`, `GET /manage/billing/deposits` |
+| Seller pricing surface | cloud console → Instances → Pricing (`GET /manage/billing/asks`) |
+| Withdraw earnings | `POST /manage/billing/withdrawals` |
+| Design & phases | [`docs/billing-design.md`](https://github.com/opentela-ai/api.opentela.ai/blob/main/docs/billing-design.md) |

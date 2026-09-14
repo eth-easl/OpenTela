@@ -339,9 +339,25 @@ func TestBillingConfigDefaults(t *testing.T) {
 	err := initConfig(cmd)
 	require.NoError(t, err)
 
-	// Test billing configuration defaults
+	// The retired legacy settlement switch must keep defaulting to false (the
+	// fail-fast guard in initConfig fires only when an operator enables it).
 	assert.Equal(t, false, viper.GetBool("billing.enabled"), "billing.enabled should default to false")
-	assert.Equal(t, 10000000, viper.GetInt("billing.value_threshold"), "billing.value_threshold should default to 10000000")
-	assert.Equal(t, 60, viper.GetInt("billing.max_interval_minutes"), "billing.max_interval_minutes should default to 60")
-	assert.Equal(t, 10, viper.GetInt("billing.dispute_threshold_pct"), "billing.dispute_threshold_pct should default to 10")
+}
+
+// TestInitConfigRetiredBillingGuard verifies the fail-fast guard: enabling the
+// retired legacy settlement switch (OF_BILLING_ENABLED / billing.enabled) must
+// abort startup with a pointer to the API market instead of silently no-op'ing.
+func TestInitConfigRetiredBillingGuard(t *testing.T) {
+	viper.Reset()
+
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("OF_BILLING_ENABLED", "true")
+
+	cfgFile = ""
+	cmd := &cobra.Command{}
+	err := initConfig(cmd)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "billing.enabled is set", "guard error should name the switch")
+	assert.Contains(t, err.Error(), "API market", "guard error should point at the single billing rail")
 }

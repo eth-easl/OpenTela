@@ -2,7 +2,6 @@ package usage
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	badger "github.com/dgraph-io/badger/v4"
@@ -67,73 +66,4 @@ func (s *UsageStore) GetRecord(requestID string, metricName string) (*UsageRecor
 	}
 
 	return &record, nil
-}
-
-// GetPendingRecords retrieves unaggregated records for a specific consumer/provider/service/metric
-func (s *UsageStore) GetPendingRecords(consumer, provider, service, metric string) ([]*UsageRecord, error) {
-	var records []*UsageRecord
-
-	prefix := []byte("record/")
-
-	err := s.db.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			item := it.Item()
-			err := item.Value(func(val []byte) error {
-				var record UsageRecord
-				if err := json.Unmarshal(val, &record); err != nil {
-					return err
-				}
-
-				// Filter by criteria
-				if record.ConsumerPeer == consumer &&
-					record.ProviderPeer == provider &&
-					record.Service == service &&
-					record.MetricName == metric {
-					records = append(records, &record)
-				}
-
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-
-	return records, err
-}
-
-// MarkAggregated removes records that have been aggregated.
-// Each element in records must be a "requestID/metricName" compound key
-// matching the format used by SaveRecord.
-func (s *UsageStore) MarkAggregated(records []*UsageRecord) error {
-	return s.db.Update(func(txn *badger.Txn) error {
-		for _, r := range records {
-			key := []byte(fmt.Sprintf("record/%s/%s", r.RequestID, r.MetricName))
-			if err := txn.Delete(key); err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-// SaveAggregate stores an aggregated usage record
-func (s *UsageStore) SaveAggregate(agg *AggregatedUsage) error {
-	key := []byte(fmt.Sprintf("aggregate/%s/%s/%s/%d",
-		agg.PeerID, agg.Service, agg.MetricName, agg.WindowStart))
-
-	data, err := json.Marshal(agg)
-	if err != nil {
-		return fmt.Errorf("marshalling aggregate: %w", err)
-	}
-
-	return s.db.Update(func(txn *badger.Txn) error {
-		return txn.Set(key, data)
-	})
 }

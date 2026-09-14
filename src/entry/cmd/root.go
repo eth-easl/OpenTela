@@ -126,11 +126,14 @@ func initConfig(cmd *cobra.Command) error {
 	viper.SetDefault("crdt.tombstone_compaction_interval", "1h")
 	viper.SetDefault("crdt.tombstone_compaction_batch", 512)
 
-	// Add billing configuration defaults (opt-in, disabled by default)
+	// The legacy direct-transfer settlement rail (rates.yaml per-1000 pricing,
+	// head-signed SPL transfers, CRDT dispute reconciliation) was retired:
+	// OpenTela has a single billing rail — the API market (api.opentela.ai
+	// billing gateway). Sellers publish asks (askpublish), buyers fund credit
+	// and set per-request caps, the gateway meters and settles. The switch is
+	// kept as a fail-fast guard so stale operator configs error at startup
+	// instead of silently doing nothing.
 	viper.SetDefault("billing.enabled", false)
-	viper.SetDefault("billing.value_threshold", 10000000) // lamports
-	viper.SetDefault("billing.max_interval_minutes", 60)
-	viper.SetDefault("billing.dispute_threshold_pct", 10)
 
 	// Analytics (PostHog) — opt-in, disabled by default
 	viper.SetDefault("analytics.enabled", false)
@@ -291,6 +294,15 @@ func initConfig(cmd *cobra.Command) error {
 			}
 		}
 	})
+	// Fail fast on the retired legacy settlement switch (see the defaults block
+	// above): billing runs exclusively through the API market now.
+	if viper.GetBool("billing.enabled") {
+		return fmt.Errorf("billing.enabled is set, but the legacy direct-transfer " +
+			"settlement rail (rates.yaml, head-signed SPL transfers) was removed; " +
+			"OpenTela billing runs exclusively through the API market " +
+			"(https://github.com/opentela-ai/api.opentela.ai — sellers publish asks " +
+			"with askpublish, buyers fund credit and set per-request caps)")
+	}
 	common.InitLogger()
 	return nil
 }

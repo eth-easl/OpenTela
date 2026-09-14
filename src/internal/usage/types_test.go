@@ -23,20 +23,3 @@ func TestUsageRecordValidation(t *testing.T) {
 		t.Error("MetricValue should be positive")
 	}
 }
-
-func TestAggregatedUsageWindow(t *testing.T) {
-	now := time.Now().Unix()
-	agg := AggregatedUsage{
-		PeerID:      "peer-1",
-		Service:     "llm",
-		MetricName:  "tokens",
-		TotalValue:  5000,
-		RecordCount: 5,
-		WindowStart: now - 3600,
-		WindowEnd:   now,
-	}
-
-	if agg.WindowEnd <= agg.WindowStart {
-		t.Error("WindowEnd should be after WindowStart")
-	}
-}
