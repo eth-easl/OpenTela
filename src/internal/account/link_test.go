@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,29 +141,65 @@ func TestLinkWalletPropagatesConflictBody(t *testing.T) {
 	}
 }
 
-func TestSignInEmailReadsJWTHeader(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/sign-in/email" || r.Method != http.MethodPost {
-			t.Fatalf("unexpected call: %s %s", r.Method, r.URL.Path)
-		}
-		var req map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if req["email"] != "op@example.com" || req["password"] != "hunter2" {
-			t.Fatalf("sign-in body=%+v", req)
-		}
-		w.Header().Set("set-auth-jwt", "header.payload.signature")
+// authServer mimics Better Auth's real header behavior (verified against
+// better-auth 1.4.18 with the jwt plugin, the stack Neon Auth runs): the
+// set-auth-jwt header is attached ONLY to /get-session responses, never to
+// /sign-in/email, which instead establishes an HttpOnly session cookie.
+// opts, when set, intercept a request and reply for themselves.
+func authServer(t *testing.T, getSessionJWT string, opts ...func(w http.ResponseWriter, r *http.Request) bool) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/sign-in/email", func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name: "better-auth.session_token", Value: "opaque-session-token", Path: "/", HttpOnly: true,
+		})
 		_, _ = w.Write([]byte(`{"user":{"email":"op@example.com"}}`))
+	})
+	mux.HandleFunc("/get-session", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("get-session: want GET, got %s", r.Method)
+		}
+		if r.Header.Get("Cookie") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if getSessionJWT != "" {
+			w.Header().Set("set-auth-jwt", getSessionJWT)
+		}
+		_, _ = w.Write([]byte(`{"session":{},"user":{"email":"op@example.com"}}`))
+	})
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, opt := range opts {
+			if opt(w, r) {
+				return
+			}
+		}
+		mux.ServeHTTP(w, r)
 	}))
+}
+
+// TestSignInEmailExchangesCookieForJWT pins the real two-step flow: sign-in
+// sets the session cookie (with no JWT header), and the JWT arrives only on
+// the follow-up /get-session call carrying that cookie.
+func TestSignInEmailExchangesCookieForJWT(t *testing.T) {
+	var getSessionHadCookie bool
+	srv := authServer(t, "header.payload.signature", func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/get-session" {
+			getSessionHadCookie = r.Header.Get("Cookie") != ""
+		}
+		return false
+	})
 	defer srv.Close()
 
-	jwt, err := SignInEmail(context.Background(), srv.Client(), srv.URL, "op@example.com", "hunter2")
+	jwt, err := SignInEmail(context.Background(), srv.Client(), srv.URL, "op@example.com", "correct-horse-battery")
 	if err != nil {
 		t.Fatalf("SignInEmail: %v", err)
 	}
 	if jwt != "header.payload.signature" {
-		t.Fatalf("jwt=%q, want the set-auth-jwt header value", jwt)
+		t.Fatalf("jwt=%q, want the set-auth-jwt header from get-session", jwt)
+	}
+	if !getSessionHadCookie {
+		t.Fatal("get-session was called without the sign-in session cookie")
 	}
 }
 
@@ -183,14 +220,46 @@ func TestSignInEmailSurfacesServerError(t *testing.T) {
 	}
 }
 
-func TestSignInEmailMissingJWTHeader(t *testing.T) {
+// A two-factor account gets a 200 sign-in response with no session; the CLI
+// must explain that instead of hunting for a JWT.
+func TestSignInEmailTwoFactorRedirect(t *testing.T) {
+	srv := authServer(t, "header.payload.signature", func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/sign-in/email" {
+			_, _ = w.Write([]byte(`{"twoFactorRedirect":true}`))
+			return true
+		}
+		return false
+	})
+	defer srv.Close()
+
+	_, err := SignInEmail(context.Background(), srv.Client(), srv.URL, "op@example.com", "correct-horse-battery")
+	if err == nil || !strings.Contains(err.Error(), "two-factor") {
+		t.Fatalf("err=%v, want a two-factor explanation", err)
+	}
+}
+
+// 200 sign-in with no session cookie (and no two-factor flag) cannot be
+// turned into a JWT; the error must say so.
+func TestSignInEmailNoSessionCookie(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"user":{"email":"op@example.com"}}`))
 	}))
 	defer srv.Close()
 
-	_, err := SignInEmail(context.Background(), srv.Client(), srv.URL, "op@example.com", "hunter2")
+	_, err := SignInEmail(context.Background(), srv.Client(), srv.URL, "op@example.com", "correct-horse-battery")
+	if err == nil || !strings.Contains(err.Error(), "no session cookie") {
+		t.Fatalf("err=%v, want a missing-session-cookie error", err)
+	}
+}
+
+// Server signs in but /get-session carries no set-auth-jwt (JWT plugin
+// disabled or changed): report it rather than sending an empty bearer.
+func TestSignInEmailMissingJWTOnGetSession(t *testing.T) {
+	srv := authServer(t, "")
+	defer srv.Close()
+
+	_, err := SignInEmail(context.Background(), srv.Client(), srv.URL, "op@example.com", "correct-horse-battery")
 	if err == nil {
-		t.Fatal("expected an error when set-auth-jwt is absent")
+		t.Fatal("expected an error when set-auth-jwt is absent on get-session")
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mr-tron/base58"
@@ -151,8 +152,12 @@ func (c *Client) LinkWallet(
 }
 
 // signInRequest/response mirror Better Auth's email-password sign-in. The
-// usable JWT travels in the set-auth-jwt response header (the browser client
-// copies it into its session); the body offers no guaranteed-JWT field.
+// usable JWT is NOT on the sign-in response: Better Auth's jwt plugin attaches
+// the set-auth-jwt header only to GET /get-session (its after-hook matcher is
+// `context.path === "/get-session"`). Sign-in merely sets the HttpOnly session
+// cookie, so a successful sign-in must be followed by an authenticated
+// /get-session call carrying that cookie; the JWT then travels in that
+// response's set-auth-jwt header.
 func SignInEmail(
 	ctx context.Context, httpClient *http.Client, neonAuthURL, email, password string,
 ) (string, error) {
@@ -174,21 +179,67 @@ func SignInEmail(
 	if err != nil {
 		return "", fmt.Errorf("call sign-in/email: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	closeErr := resp.Body.Close()
 	if err != nil {
 		return "", fmt.Errorf("read sign-in response: %w", err)
+	}
+	if closeErr != nil {
+		return "", fmt.Errorf("close sign-in response: %w", closeErr)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return "", &APIError{Status: resp.StatusCode, Body: string(bytes.TrimSpace(raw))}
 	}
 
-	jwt := resp.Header.Get("set-auth-jwt")
+	// Two-factor accounts answer 200 without creating a session.
+	var signIn struct {
+		TwoFactorRedirect bool `json:"twoFactorRedirect"`
+	}
+	if err := json.Unmarshal(raw, &signIn); err == nil && signIn.TwoFactorRedirect {
+		return "", fmt.Errorf("two-factor authentication is enabled for this account; " +
+			"disable it in the console or sign in there and use --token")
+	}
+
+	// Sign-in only establishes the session cookie; keep it for /get-session.
+	cookies := resp.Cookies()
+	if len(cookies) == 0 {
+		return "", fmt.Errorf(
+			"sign-in succeeded but the auth server returned no session cookie; " +
+				"sign in at the console and use --token instead")
+	}
+	parts := make([]string, 0, len(cookies))
+	for _, c := range cookies {
+		parts = append(parts, c.Name+"="+c.Value)
+	}
+
+	sessionReq, err := http.NewRequestWithContext(
+		ctx, http.MethodGet, neonAuthURL+"/get-session", nil)
+	if err != nil {
+		return "", fmt.Errorf("build get-session request: %w", err)
+	}
+	sessionReq.Header.Set("Cookie", strings.Join(parts, "; "))
+	sessionResp, err := httpClient.Do(sessionReq)
+	if err != nil {
+		return "", fmt.Errorf("call get-session: %w", err)
+	}
+	defer func() { _ = sessionResp.Body.Close() }()
+	if sessionResp.StatusCode < 200 || sessionResp.StatusCode > 299 {
+		sessionRaw, err := io.ReadAll(io.LimitReader(sessionResp.Body, 1<<20))
+		if err != nil {
+			return "", fmt.Errorf("read get-session response: %w", err)
+		}
+		return "", &APIError{
+			Status: sessionResp.StatusCode,
+			Body:   string(bytes.TrimSpace(sessionRaw)),
+		}
+	}
+
+	jwt := sessionResp.Header.Get("set-auth-jwt")
 	if jwt == "" {
 		return "", fmt.Errorf(
 			"sign-in succeeded but the auth server did not issue a JWT " +
-				"(no set-auth-jwt header); sign in at the console instead")
+				"(no set-auth-jwt header on get-session); sign in at the console " +
+				"and use --token instead")
 	}
 	return jwt, nil
 }

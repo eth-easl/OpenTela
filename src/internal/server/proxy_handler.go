@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/http/httputil"
@@ -13,6 +14,7 @@ import (
 	"opentela/internal/common"
 	"opentela/internal/protocol"
 	"opentela/internal/usage"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -547,6 +549,77 @@ func intersectAllowedPeers(candidates []string, allowedHeader string) []string {
 	return result
 }
 
+// priceAwareScores assigns each remaining candidate a selection weight that
+// decays exponentially with its price rank: rank 0 weighs 1, rank r weighs
+// decay^r. Peers absent from the order (defensive) weigh like the tail rank.
+// The result feeds weightedRandomSelect so the cheapest affordable peer wins
+// most traffic while the rest of the affordable set still serves — the market
+// signal from the billing gate's cheapest-first X-Otela-Allowed-Peers stamp,
+// enabled by routing.price_weight_decay (0 = legacy uniform policies).
+func priceAwareScores(ids []string, order []string, decay float64) []weightedCandidate {
+	ranks := make(map[string]int, len(order))
+	for i, id := range order {
+		ranks[id] = i
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	tail := len(ids)
+	result := make([]weightedCandidate, 0, len(ids))
+	for _, id := range ids {
+		rank, ok := ranks[id]
+		if !ok {
+			rank = tail
+		}
+		result = append(result, weightedCandidate{peerID: id, score: math.Pow(decay, float64(rank))})
+	}
+	return result
+}
+
+// parseAllowedPeerOrder returns the peer IDs in the gate's
+// X-Otela-Allowed-Peers header in header order (deduplicated, blanks
+// dropped). The billing gate stamps this header cheapest-affordable-first,
+// so index 0 is the cheapest peer the buyer can afford.
+func parseAllowedPeerOrder(allowedHeader string) []string {
+	seen := make(map[string]bool)
+	var order []string
+	for _, id := range strings.Split(allowedHeader, ",") {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		order = append(order, id)
+	}
+	return order
+}
+
+// orderCandidatesByPrice re-orders candidates to follow the gate's
+// cheapest-first price order (stable: peers missing from the order keep
+// their relative position at the tail). Combined with the order-preserving
+// exclusion in the retry loop, this makes remaining[0] the cheapest
+// surviving peer, so a failed attempt deterministically prefers the
+// next-cheapest allowed peer instead of a random one.
+func orderCandidatesByPrice(candidates []string, order []string) []string {
+	ranks := make(map[string]int, len(order))
+	for i, id := range order {
+		ranks[id] = i
+	}
+	tail := len(candidates)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		ri, oki := ranks[candidates[i]]
+		if !oki {
+			ri = tail
+		}
+		rj, okj := ranks[candidates[j]]
+		if !okj {
+			rj = tail
+		}
+		return ri < rj
+	})
+	return candidates
+}
+
 func filterAllowedCandidatesV2(candidates []string, decision *controlPlaneDecisionV2) []string {
 	if decision == nil {
 		return candidates
@@ -642,6 +715,9 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 	st.Mark("head_dnt")
 	routingFallbackTotal.WithLabelValues(serviceName, strconv.Itoa(fallbackLevel)).Inc()
 
+	// Price order from the billing gate (empty when the header is absent).
+	var allowedPeerOrder []string
+
 	// X-Otela-Allowed-Peers: the billing gate (api.opentela.ai) stamps the
 	// cheapest affordable peers on every forwarded request. Intersect the
 	// identity-group candidates with this allowlist so the mesh head never
@@ -653,6 +729,9 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no billing-affordable provider for the requested service."})
 			return
 		}
+		// The gate stamps this header cheapest-affordable-first; keep the
+		// order for price-aware routing (routing.price_weight_decay).
+		allowedPeerOrder = parseAllowedPeerOrder(allowed)
 	}
 
 	if len(candidates) == 0 {
@@ -762,6 +841,21 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 	// track in-flight requests per peer for queue-aware policies.
 	lb := GetLoadBalancer()
 
+	// Price-aware routing (the mesh-head half of the API market): when
+	// configured, bias selection toward the cheapest affordable peers. The
+	// billing gate stamps X-Otela-Allowed-Peers cheapest-first; a decay in
+	// (0,1) turns that order into exponentially-decaying selection weights so
+	// the cheapest peer wins most traffic while the rest of the affordable
+	// set still serves. decay 0 (default) keeps the legacy uniform policies.
+	priceDecay := viper.GetFloat64("routing.price_weight_decay")
+	priceAware := priceDecay > 0 && priceDecay < 1 && len(allowedPeerOrder) > 0
+	if priceAware {
+		// Price-order candidates up front: with the order-preserving retry
+		// exclusion below, remaining[0] is then always the cheapest
+		// surviving affordable peer.
+		candidates = orderCandidatesByPrice(candidates, allowedPeerOrder)
+	}
+
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		remaining := excludePeers(candidates, excluded)
 		if len(remaining) == 0 {
@@ -770,10 +864,20 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 
 		// Select peer
 		var targetPeer string
-		if viper.GetBool("scalability.weighted_routing") {
+		switch {
+		case priceAware && attempt == 0:
+			// First pick: market signal — weight by price rank (cheapest
+			// affordable first) so load still spreads across the affordable
+			// set.
+			targetPeer = weightedRandomSelect(priceAwareScores(remaining, allowedPeerOrder, priceDecay))
+		case priceAware:
+			// Retry after a failure: deterministically prefer the
+			// next-cheapest surviving allowed peer.
+			targetPeer = remaining[0]
+		case viper.GetBool("scalability.weighted_routing"):
 			weighted := scoreCandidates(remaining)
 			targetPeer = weightedRandomSelect(weighted)
-		} else {
+		default:
 			// Pick among the remaining candidates using the configured
 			// load balancing policy.
 			targetPeer = remaining[lb.Pick(remaining)]

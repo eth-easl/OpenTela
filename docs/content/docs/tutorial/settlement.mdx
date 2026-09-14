@@ -8,6 +8,34 @@ OpenTela can automatically settle usage bills between consumers and providers us
 
 This document explains how to configure and operate the settlement system.
 
+<Callout type="warn" title="Two independent billing models — do not mix them on the same traffic">
+
+OpenTela currently ships **two separate billing systems**:
+
+1. **Legacy peer-to-peer settlement (this document)** — configured with
+   `rates.yaml`, priced **per 1,000 units**, settled by **direct SPL
+   transfers** between buyer and seller wallets, reconciled over CRDT. No
+   central service is involved.
+2. **The API market (api.opentela.ai billing gateway)** — sellers publish
+   **asks priced per million units** (`askpublish`), buyers hold **credit
+   accounts** and cap spend with per-request max-fee headers, and the
+   gateway settles through its own treasury and ledger.
+
+These models share no state: a peer priced in `rates.yaml` is invisible to
+the gateway's market, and gateway-billed traffic never triggers this
+document's CRDT settlement. Running both against the same traffic route
+**double-bills buyers** (once via direct SPL transfer, once via gateway
+credit). Deploy exactly one model per traffic path:
+
+- Pure mesh (head + workers you run, no gateway) → this document.
+- Traffic through `api.opentela.ai` → the gateway's billing configuration;
+  leave the settlement settings below **disabled** on those heads.
+
+A unified settlement design (non-custodial, delegated spending) is tracked
+in the gateway repo's `docs/billing-design.md` §11.
+
+</Callout>
+
 ## Overview
 
 The settlement flow works as follows:

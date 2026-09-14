@@ -195,6 +195,11 @@ func initConfig(cmd *cobra.Command) error {
 	viper.SetDefault("routing.retry_enabled", true)
 	viper.SetDefault("routing.max_retries", 3)
 	viper.SetDefault("routing.max_response_buffer_bytes", 64*1024*1024) // 64MB
+	// Price-aware routing: exponential selection-weight decay over the billing
+	// gate's cheapest-first X-Otela-Allowed-Peers order. 0 disables (uniform
+	// legacy policies); e.g. 0.5 makes the cheapest affordable peer roughly
+	// twice as likely as the next. Env: OF_ROUTING_PRICE_WEIGHT_DECAY.
+	viper.SetDefault("routing.price_weight_decay", 0.0)
 
 	// CRDT tuned values (used when scalability.crdt_tuned=true)
 	viper.SetDefault("crdt.tuned_gossipsub_d", 10)

@@ -191,6 +191,33 @@ A request with `"model": "Llama-3-70B"` and `X-Otela-Fallback: 2` does not match
 | `model=*` | Request body has a `"model"` field (any value) | 2 |
 | `all` | Always | 3 (lowest) |
 
+## Price-aware routing (billing market)
+
+When requests arrive through the billing gateway (api.opentela.ai), the
+gateway's billing gate stamps every forwarded request with
+`X-Otela-Allowed-Peers`: the sellers the buyer can afford, in ascending price
+order (cheapest first — see the [gateway billing
+docs](https://github.com/opentela-ai/api.opentela.ai/blob/main/docs/billing-design.md)).
+The head intersects this with its identity-group candidates, so a request is
+never routed to a peer the buyer cannot afford.
+
+By default the affordable set is then load-balanced uniformly — seller asks
+constrain *whether* a peer can serve, but not *which* affordable peer is
+picked. To let prices influence selection, enable price-aware routing:
+
+```bash
+# env: OF_ROUTING_PRICE_WEIGHT_DECAY
+viper.Set("routing.price_weight_decay", 0.5)
+```
+
+With a decay in `(0,1)`, the head turns the gate's price order into
+exponentially decaying selection weights: rank 0 (cheapest affordable peer)
+weighs `1`, rank *r* weighs `decay^r`. With `0.5` and three affordable
+peers, the cheapest wins roughly 57% of requests, the next 29%, the most
+expensive 14% — a soft price signal that still spreads load and tolerates
+failures (retries exclude the failed peer and re-weight the remainder).
+`0` (default) keeps the legacy uniform policies exactly.
+
 ## Endpoints in detail
 
 ### Global Service Forward — `/v1/service/:service/*path`
