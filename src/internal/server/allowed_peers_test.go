@@ -1,7 +1,6 @@
 package server
 
 import (
-	"math"
 	"testing"
 )
 
@@ -101,8 +100,8 @@ func TestPriceAwareScoresUnknownPeerGetsTailWeight(t *testing.T) {
 	if byID["peer-C"] != 1.0 {
 		t.Fatalf("ranked peer score = %v, want 1.0", byID["peer-C"])
 	}
-	if byID["peer-Z"] != math.Pow(0.5, 2) {
-		t.Fatalf("unranked peer score = %v, want %v", byID["peer-Z"], math.Pow(0.5, 2))
+	if byID["peer-Z"] != 0.5*0.5 {
+		t.Fatalf("unranked peer score = %v, want %v", byID["peer-Z"], 0.5*0.5)
 	}
 }
 
