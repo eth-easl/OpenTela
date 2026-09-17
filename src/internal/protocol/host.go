@@ -59,7 +59,7 @@ var MyID string
 var holePunchService *holepunch.Service
 
 const (
-	Version = "0.0.0-dev.0"
+	Version = "v0.2.5"
 )
 
 func GetP2PNode(ds datastore.Batching) (host.Host, dualdht.DHT) {
