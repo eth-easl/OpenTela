@@ -10,6 +10,14 @@ const (
 	// peerStaleAfter is how long a disconnected peer is retained before its
 	// row is dropped entirely.
 	peerStaleAfter = 10 * time.Minute
+	// peerServiceStaleAfter is how long a *disconnected* peer carrying
+	// services is retained before its row is dropped. Service rows outlive the
+	// plain stale window because they carry the record of what the worker was
+	// serving, but the trail is capped: a row that has been disconnected for a
+	// week is not coming back (a live worker re-registers within minutes) and
+	// only accumulates — every ended SLURM job would otherwise leave a ghost
+	// in the table forever.
+	peerServiceStaleAfter = 7 * 24 * time.Hour
 )
 
 // peerSweepAction is what the maintenance sweep decides to do with one entry.
@@ -70,10 +78,15 @@ func decideSweepAction(p Peer, verdict probeVerdict, now time.Time) peerSweepAct
 		return sweepKeep
 	}
 
-	// Already disconnected. Service-carrying rows are retained rather than
-	// deleted: routing only consults Connected, so the row is inert, and
-	// keeping it preserves the trail for whoever asks why a worker vanished.
+	// Already disconnected. Service-carrying rows are retained for a grace
+	// period rather than dropped at once: routing only consults Connected, so
+	// the row is inert, and keeping it preserves the trail for whoever asks
+	// why a worker vanished. Past peerServiceStaleAfter the trail is stale, not
+	// evidence, and the row is dropped like any other.
 	if len(p.Service) > 0 {
+		if lastSeen.Add(peerServiceStaleAfter).Before(now) {
+			return sweepDelete
+		}
 		return sweepKeep
 	}
 	if lastSeen.Add(peerStaleAfter).Before(now) {

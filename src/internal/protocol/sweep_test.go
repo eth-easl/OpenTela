@@ -70,6 +70,22 @@ func TestDecideSweepAction(t *testing.T) {
 			want:    sweepKeep,
 		},
 		{
+			// ...but the trail is capped: a row disconnected for more than
+			// peerServiceStaleAfter is not coming back (a live worker
+			// re-registers within minutes) and only accumulates — one ghost
+			// per ended job, forever, otherwise.
+			name:    "disconnected service peer past the retention cap is deleted",
+			peer:    Peer{ID: "g2", Connected: false, LastSeen: now.Add(-8 * 24 * time.Hour).Unix(), Service: withSvc},
+			verdict: probeUnknown,
+			want:    sweepDelete,
+		},
+		{
+			name:    "disconnected service peer just inside the retention cap is kept",
+			peer:    Peer{ID: "g3", Connected: false, LastSeen: now.Add(-6 * 24 * time.Hour).Unix(), Service: withSvc},
+			verdict: probeUnknown,
+			want:    sweepKeep,
+		},
+		{
 			name:    "peer with no LastSeen is left alone",
 			peer:    Peer{ID: "h", Connected: true, LastSeen: 0},
 			verdict: probeUnknown,

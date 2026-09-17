@@ -93,6 +93,9 @@ func classifyProbeError(err error) probeVerdict {
 // being unable to reach the relay at all — returns probeUnknown, because it is
 // evidence about the relay rather than the peer, and evicting on it would
 // retire every worker behind a relay that is merely restarting.
+//
+// When this node is itself the peer's relay, the verdict is derived from local
+// connection state instead — see selfRelayVerdict.
 func ProbePeerLiveness(ctx context.Context, peerID string) probeVerdict {
 	h, _ := GetP2PNode(nil)
 	if h == nil {
@@ -111,11 +114,27 @@ func ProbePeerLiveness(ctx context.Context, peerID string) probeVerdict {
 	if err != nil {
 		return probeUnknown
 	}
-	// If the relay itself is unreachable, any dial failure below would say
-	// nothing about the worker. Bail out early rather than manufacture a
-	// verdict from an unanswerable question.
+	// We may be the worker's relay ourselves — the common case when the
+	// dispatcher and relay run in one process. A node is never libp2p-connected
+	// to its own peer ID, so the dial path below is structurally unable to
+	// produce a verdict here; before this branch, workers relayed by such a
+	// node were permanently un-evictable.
+	if relayPID == h.ID() {
+		return selfRelayVerdict(h.Network().Connectedness(pid))
+	}
+	// The relay is not currently connected. Seed its advertised address from
+	// the node table so the circuit dial below can still reach it — this is
+	// exactly when the probe matters, because a head holding no connection to
+	// the worker's relay still needs a verdict (the split observed between
+	// ocf-1 and ocf-2). If the relay has no usable address or stays
+	// unreachable, the dial fails and classifyProbeError maps the failure to
+	// probeUnknown — evidence about the relay, never about the worker — the
+	// same fail-safe direction the old early bail provided, without its
+	// blind spot.
 	if h.Network().Connectedness(relayPID) != network.Connected {
-		return probeUnknown
+		if addr := relayDialAddr(entry.RelayPeer); addr != nil {
+			h.Peerstore().AddAddr(relayPID, addr, probeAddrTTL)
+		}
 	}
 
 	circuit, err := multiaddr.NewMultiaddr("/p2p/" + entry.RelayPeer + "/p2p-circuit")
@@ -155,6 +174,48 @@ func ProbePeerLiveness(ctx context.Context, peerID string) probeVerdict {
 	case <-dialCtx.Done():
 		return probeUnknown
 	}
+}
+
+// selfRelayVerdict is the authoritative answer when this node is itself the
+// peer's relay, derived from local state instead of a network round trip.
+//
+// It mirrors the relay's own reservation semantics exactly: circuitv2 deletes
+// a peer's reservation the moment its last connection drops (relay's
+// disconnected notifiee), and refuses circuit dials with NO_RESERVATION unless
+// a reservation exists. So when we are the relay, "Connectedness != Connected"
+// is the identical statement a circuit dial through ourselves would extract —
+// a dial libp2p cannot even attempt, since a host never connects to its own
+// peer ID.
+//
+// Limited (circuit-only) connectivity does not count as alive: the relay
+// drops the reservation in that state too, so a circuit through us would be
+// refused just the same.
+func selfRelayVerdict(connectedness network.Connectedness) probeVerdict {
+	if connectedness == network.Connected {
+		return probeAlive
+	}
+	return probeDeadAuthoritative
+}
+
+// relayDialAddr returns the relay's advertised public address from the node
+// table, so a probe can dial a relay we are not connected to. Returns nil when
+// the relay has no usable address.
+func relayDialAddr(relayID string) multiaddr.Multiaddr {
+	relayEntry, err := GetPeerFromTable(relayID)
+	if err != nil || relayEntry.PublicAddress == "" {
+		return nil
+	}
+	addrStr := BuildBootstrapAddr(
+		relayEntry.PublicAddress, relayEntry.PublicPort,
+		viper.GetString("tcpport"), relayID)
+	if addrStr == "" {
+		return nil
+	}
+	addr, err := multiaddr.NewMultiaddr(addrStr)
+	if err != nil {
+		return nil
+	}
+	return addr
 }
 
 // Probes run concurrently under a cap, and the whole pass is time-boxed. Run
@@ -241,10 +302,11 @@ func probeUnreachableServicePeers() {
 // can never reach a verdict of its own and would serve the ghost indefinitely,
 // which is exactly the split observed between ocf-1 and ocf-2.
 //
-// Only heads publish. A worker has no business retiring its peers, and
-// receivers drop records from evictors they cannot confirm to be heads.
+// Only proven evictions may be published, and only by a node entitled to
+// publish them — see mayPublishEviction. Publishing is rare and structural,
+// so it does not contribute to DAG bloat the way per-tick liveness writes did.
 func publishEviction(key ds.Key, p Peer) {
-	if viper.GetString("role") != "head" {
+	if !mayPublishEviction(p) {
 		return
 	}
 	store, _ := GetCRDTStore()
@@ -266,6 +328,24 @@ func publishEviction(key ds.Key, p Peer) {
 		return
 	}
 	common.Logger.Infof("Published eviction record for %s", p.ID)
+}
+
+// mayPublishEviction reports whether this node is entitled to publish an
+// eviction record for p.
+//
+// Heads may publish any eviction they can prove. Any node may publish an
+// eviction when it is itself the peer's advertised relay: the self-relay
+// verdict is derived from this node's own connection state, making it the
+// most authoritative witness there is. This covers dispatcher deployments
+// that run the head, the relay, and the workers' entry point in one process
+// whose configured role is still "worker" — without it, such a node could
+// fix its own table but never converge the mesh. Receivers accept that case
+// via the EvictedBy == RelayPeer match in UpdateNodeTableHook.
+func mayPublishEviction(p Peer) bool {
+	if viper.GetString("role") == "head" {
+		return true
+	}
+	return p.RelayPeer != "" && p.RelayPeer == MyID
 }
 
 // livenessEnforced reports whether probe verdicts may actually retire a peer.

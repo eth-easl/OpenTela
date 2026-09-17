@@ -411,11 +411,17 @@ func UpdateNodeTableHook(key ds.Key, value []byte) {
 	if peer.Status == LEFT {
 		// An eviction record is one node asserting that a *different* node is
 		// gone, so it needs more scrutiny than a self-announced leave. Act on it
-		// only when we can confirm the evictor is a head we already know about.
+		// when we can confirm the evictor is a head we already know about, or
+		// when the evictor is the peer's own advertised relay — the relay is the
+		// authority on whether the worker is still attached, and the record
+		// itself carries that match (EvictedBy == RelayPeer), so no table
+		// lookup is needed. That second path is what lets a dispatcher that
+		// runs the relay in-process publish verdicts mesh-wide even when its
+		// configured role is not "head".
 		// Checked before taking tableUpdateSem: isKnownHeadPeer reads the table
 		// itself and would otherwise deadlock.
-		if peer.EvictedBy != "" && !isKnownHeadPeer(peer.EvictedBy) {
-			common.Logger.Warnf("Ignoring eviction of [%s] by [%s]: evictor is not a known head peer",
+		if peer.EvictedBy != "" && peer.EvictedBy != peer.RelayPeer && !isKnownHeadPeer(peer.EvictedBy) {
+			common.Logger.Warnf("Ignoring eviction of [%s] by [%s]: evictor is neither a known head nor the peer's relay",
 				peer.ID, peer.EvictedBy)
 			return
 		}
@@ -470,6 +476,44 @@ func DeleteNodeTableHook(key ds.Key) {
 	tableUpdateSem <- struct{}{}
 	defer func() { <-tableUpdateSem }() // Release on exit
 	delete(table, key.String())
+}
+
+// DeletePeerRow removes a peer's row from the node table and publishes the
+// deletion through the CRDT so the whole mesh converges on it. It is the
+// operator escape hatch for rows that are provably dead but were never
+// evicted — dead workers whose head could not reach a verdict (see
+// ProbePeerLiveness), or rows left behind by a bug — exposed via
+// DELETE /v1/dnt/_node.
+//
+// Local-first: the in-memory row is dropped even when the CRDT publish
+// fails, and routing only consults the in-memory table, so a ghost stops
+// being served immediately. A CRDT delete cannot evict a peer that is
+// actually alive: its next registration rewrites the key and wins.
+func DeletePeerRow(peerID string) error {
+	if strings.TrimSpace(peerID) == "" {
+		return errors.New("peer id is required")
+	}
+	if peerID == MyID {
+		return errors.New("refusing to delete own row; stop the process or announce a leave instead")
+	}
+	if _, err := GetPeerFromTable(peerID); err != nil {
+		return fmt.Errorf("peer not found: %w", err)
+	}
+	DeleteNodeTableHook(ds.NewKey(peerID))
+	// Read the store variable directly rather than GetCRDTStore(), which
+	// force-initializes the whole CRDT/IPFS stack — wrong for an operator
+	// call that must work before or without CRDT connectivity. Same pattern
+	// as TriggerResync.
+	if crdtStore == nil {
+		// No CRDT connectivity: local-only delete. Each node's own sweep
+		// reaches the same conclusion independently, so absence of the publish
+		// only delays convergence, it does not prevent it.
+		return nil
+	}
+	if err := crdtStore.Delete(context.Background(), ds.NewKey(peerID)); err != nil {
+		return fmt.Errorf("row deleted locally, but CRDT publish failed: %w", err)
+	}
+	return nil
 }
 
 func GetPeerFromTable(peerId string) (Peer, error) {

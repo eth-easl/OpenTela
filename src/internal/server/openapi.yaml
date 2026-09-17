@@ -236,65 +236,35 @@ paths:
       tags:
         - DNT
 
-  /v1/dnt/_node:
     delete:
-      summary: Delete local node
-      description: Remove the local node from the node table
+      summary: Delete a node table row
+      description: >-
+        Remove a peer's row from the node table and publish a tombstone so the
+        whole mesh drops it. Localhost only. Operator escape hatch for ghost
+        rows (dead workers whose eviction never converged).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - id
               properties:
                 id:
                   type: string
-                name:
-                  type: string
-                value:
-                  type: string
-                latency:
-                  type: number
-                privileged:
-                  type: boolean
-                owner:
-                  type: string
-                current_offering:
-                  type: string
-                role:
-                  type: string
-                status:
-                  type: string
-                available_offering:
-                  type: string
-                service:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      name:
-                        type: string
-                      status:
-                        type: string
-                      host:
-                        type: string
-                      port:
-                        type: string
-                      identity_group:
-                        type: array
-                        items:
-                          type: string
-                      version:
-                        type: string
-                last_seen:
-                  type: string
-                version:
-                  type: string
+                  description: Peer ID of the row to remove ("peer_id" accepted as an alias)
       responses:
         '200':
-          description: Node deleted successfully
+          description: Row deleted locally and tombstone published
         '400':
-          description: Invalid request body
+          description: Missing peer id or invalid request body
+        '403':
+          description: Not called from localhost
+        '404':
+          description: No such peer in the node table
+        '500':
+          description: Deleted locally, but the CRDT tombstone publish failed
       tags:
         - DNT
 

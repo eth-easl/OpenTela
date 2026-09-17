@@ -2,12 +2,12 @@ package protocol
 
 import (
 	"encoding/json"
-	"time"
 	"testing"
+	"time"
 
-	"github.com/stretchr/testify/assert"
 	ds "github.com/ipfs/go-datastore"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestUpdateNodeTableHook_SelfTrust(t *testing.T) {
@@ -399,5 +399,85 @@ func TestUpdateNodeTableHook_LastSeenNeverGoesBackwards(t *testing.T) {
 	}
 	if got.LastSeen != recent {
 		t.Fatalf("LastSeen = %d, want %d — a stale record must not overwrite newer proof of life", got.LastSeen, recent)
+	}
+}
+
+// An eviction published by the peer's own relay must be accepted even when the
+// evictor is not (known to be) a head: the record itself carries the match
+// (EvictedBy == RelayPeer), and the relay is the authority on whether the
+// worker is still attached. This is what lets a dispatcher that runs the relay
+// in-process — role "worker" — converge its verdicts mesh-wide.
+func TestUpdateNodeTableHook_EvictionFromOwnRelayIsAccepted(t *testing.T) {
+	_ = GetAllPeers()
+	seedPeer(t, "relay-self-1", Peer{ID: "relay-self-1", Role: []string{"worker"}})
+	seedPeer(t, "relay-worker-1", Peer{
+		ID: "relay-worker-1", Connected: true, LastSeen: 5000,
+		RelayPeer: "relay-self-1",
+		Service:   []Service{{Name: "llm"}},
+	})
+
+	evict := Peer{ID: "relay-worker-1", Status: LEFT, EvictedBy: "relay-self-1", RelayPeer: "relay-self-1", LastSeen: 5000}
+	b, _ := json.Marshal(evict)
+	UpdateNodeTableHook(ds.NewKey("relay-worker-1"), b)
+
+	got, err := GetPeerFromTable("relay-worker-1")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got.Connected {
+		t.Fatal("expected the worker to be marked disconnected by its own relay's eviction record")
+	}
+}
+
+// The relay-match exemption must not become a loophole: an evictor that merely
+// shares the relay's ID string but does not match the peer's advertised
+// RelayPeer is still subject to the known-head requirement.
+func TestUpdateNodeTableHook_EvictionByNonRelayNonHeadStillIgnored(t *testing.T) {
+	_ = GetAllPeers()
+	seedPeer(t, "relay-self-2", Peer{ID: "relay-self-2", Role: []string{"worker"}})
+	seedPeer(t, "relay-worker-2", Peer{
+		ID: "relay-worker-2", Connected: true, LastSeen: 5000,
+		RelayPeer: "some-other-relay",
+		Service:   []Service{{Name: "llm"}},
+	})
+
+	evict := Peer{ID: "relay-worker-2", Status: LEFT, EvictedBy: "relay-self-2", RelayPeer: "some-other-relay", LastSeen: 5000}
+	b, _ := json.Marshal(evict)
+	UpdateNodeTableHook(ds.NewKey("relay-worker-2"), b)
+
+	got, err := GetPeerFromTable("relay-worker-2")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !got.Connected {
+		t.Fatal("an evictor that is neither a known head nor the peer's relay must not evict")
+	}
+}
+
+// DeletePeerRow is the operator escape hatch for ghost rows: it must remove
+// the row locally, refuse the node's own row, and fail cleanly for unknown
+// peers. With no CRDT store it stays local-only (sweeps converge the rest).
+func TestDeletePeerRow(t *testing.T) {
+	_ = GetAllPeers()
+	oldMyID := MyID
+	defer func() { MyID = oldMyID }()
+	MyID = "self-node"
+
+	seedPeer(t, "ghost-worker", Peer{ID: "ghost-worker", Connected: true, LastSeen: 5000, Service: []Service{{Name: "llm"}}})
+
+	if err := DeletePeerRow(""); err == nil {
+		t.Fatal("empty peer id must be rejected")
+	}
+	if err := DeletePeerRow("self-node"); err == nil {
+		t.Fatal("deleting the node's own row must be refused")
+	}
+	if err := DeletePeerRow("never-seen"); err == nil {
+		t.Fatal("deleting an unknown peer must fail")
+	}
+	if err := DeletePeerRow("ghost-worker"); err != nil {
+		t.Fatalf("deleting a seeded ghost must succeed, got: %v", err)
+	}
+	if _, err := GetPeerFromTable("ghost-worker"); err == nil {
+		t.Fatal("row must be gone from the table after DeletePeerRow")
 	}
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"opentela/internal/protocol"
+	"strings"
 	"time"
 
 	"github.com/axiomhq/axiom-go/axiom"
@@ -52,13 +53,44 @@ func updateLocal(c *gin.Context) {
 	protocol.UpdateNodeTable(peer)
 }
 
+// deleteLocal removes a peer's row from the node table and publishes a
+// tombstone so the whole mesh drops it. Localhost only: this is the operator
+// escape hatch for ghost rows — dead workers whose eviction never converged.
+// Body: {"id": "<peer id>"} ("peer_id" is accepted as an alias).
+//
+// This handler used to ignore its body entirely and announce this node's
+// *own* leave — taking the node itself out of the table instead of the peer
+// the operator asked to remove.
 func deleteLocal(c *gin.Context) {
-	var peer protocol.Peer
-	if err := c.BindJSON(&peer); err != nil {
+	if !isLoopback(c) {
+		c.JSON(403, gin.H{"error": "localhost only"})
+		return
+	}
+	var req struct {
+		ID     string `json:"id"`
+		PeerID string `json:"peer_id"`
+	}
+	if err := c.BindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	protocol.AnnounceLeave()
+	peerID := strings.TrimSpace(req.ID)
+	if peerID == "" {
+		peerID = strings.TrimSpace(req.PeerID)
+	}
+	if peerID == "" {
+		c.JSON(400, gin.H{"error": "peer id required (field \"id\" or \"peer_id\")"})
+		return
+	}
+	if err := protocol.DeletePeerRow(peerID); err != nil {
+		if strings.Contains(err.Error(), "peer not found") {
+			c.JSON(404, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"deleted": peerID})
 }
 
 func getDNT(c *gin.Context) {

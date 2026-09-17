@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	ds "github.com/ipfs/go-datastore"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+
+	"opentela/internal/protocol"
 )
 
 func init() {
@@ -102,4 +106,51 @@ func TestGetResourceStats(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Contains(t, response, "connected_peers")
 	assert.Contains(t, response, "total_peers_known")
+}
+
+func TestDeleteLocal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.DELETE("/v1/dnt/_node", deleteLocal)
+
+	// Seed a ghost row directly in the protocol table.
+	ghost := protocol.Peer{ID: "ghost-worker", Connected: true, LastSeen: 5000}
+	b, _ := json.Marshal(ghost)
+	protocol.UpdateNodeTableHook(ds.NewKey("ghost-worker"), b)
+
+	doDelete := func(remoteAddr, body string) *httptest.ResponseRecorder {
+		req, _ := http.NewRequest("DELETE", "/v1/dnt/_node", strings.NewReader(body))
+		req.RemoteAddr = remoteAddr
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// Remote callers are refused: this is the operator ghost-purge hatch.
+	if w := doDelete("10.1.2.3:4444", `{"id":"ghost-worker"}`); w.Code != 403 {
+		t.Fatalf("remote delete: got %d, want 403 (%s)", w.Code, w.Body.String())
+	}
+
+	// Missing peer id.
+	if w := doDelete("127.0.0.1:9999", `{}`); w.Code != 400 {
+		t.Fatalf("missing id: got %d, want 400", w.Code)
+	}
+
+	// Unknown peer.
+	if w := doDelete("127.0.0.1:9999", `{"id":"never-seen"}`); w.Code != 404 {
+		t.Fatalf("unknown peer: got %d, want 404 (%s)", w.Code, w.Body.String())
+	}
+
+	// Happy path: the ghost row is gone and the node's own row untouched.
+	//
+	// The old implementation ignored the body and announced this node's OWN
+	// leave — if that behavior ever comes back, this assertion fails because
+	// DeletePeerRow refuses to delete self.
+	if w := doDelete("127.0.0.1:9999", `{"id":"ghost-worker"}`); w.Code != 200 {
+		t.Fatalf("localhost delete: got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if _, err := protocol.GetPeerFromTable("ghost-worker"); err == nil {
+		t.Fatal("ghost row must be removed from the table")
+	}
 }

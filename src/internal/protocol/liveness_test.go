@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/libp2p/go-libp2p/core/network"
 	pbv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/pb"
+	"github.com/spf13/viper"
 )
 
 // classifyProbeError matches a string because circuitv2/client.relayError is
@@ -91,5 +93,60 @@ func TestClassifyProbeError(t *testing.T) {
 				t.Fatalf("classifyProbeError(%v) = %v, want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+// selfRelayVerdict is the branch that fixes ghosts relayed by the node itself:
+// when the dispatcher and the relay are one process (a node can never be
+// libp2p-connected to its own peer ID), the dial path below could never
+// produce a verdict and workers behind it were un-evictable. The local
+// connectedness must mirror the relay's reservation semantics: connected
+// means alive, anything else (NotConnected, Limited, CannotConnect) is the
+// same statement NO_RESERVATION would make.
+func TestSelfRelayVerdict(t *testing.T) {
+	cases := []struct {
+		name          string
+		connectedness network.Connectedness
+		want          probeVerdict
+	}{
+		{"connected worker is alive", network.Connected, probeAlive},
+		{"no connection means no reservation: dead", network.NotConnected, probeDeadAuthoritative},
+		{"circuit-only connection lost the reservation too", network.Limited, probeDeadAuthoritative},
+		{"unknown connectedness fails safe as absent", network.Connectedness(99), probeDeadAuthoritative},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := selfRelayVerdict(tc.connectedness); got != tc.want {
+				t.Fatalf("selfRelayVerdict(%v) = %v, want %v", tc.connectedness, got, tc.want)
+			}
+		})
+	}
+}
+
+// mayPublishEviction must let a node publish when it is itself the peer's
+// advertised relay — the dispatcher-in-one-process deployment — even though its
+// role is "worker". Anything else non-head must stay silent.
+func TestMayPublishEviction(t *testing.T) {
+	oldRole, oldMyID := viper.GetString("role"), MyID
+	defer func() {
+		viper.Set("role", oldRole)
+		MyID = oldMyID
+	}()
+
+	viper.Set("role", "head")
+	if !mayPublishEviction(Peer{ID: "w", RelayPeer: "some-other-relay"}) {
+		t.Fatal("a head must be allowed to publish any proven eviction")
+	}
+
+	viper.Set("role", "worker")
+	MyID = "relay-self"
+	if !mayPublishEviction(Peer{ID: "w", RelayPeer: "relay-self"}) {
+		t.Fatal("a node that is the peer's advertised relay must be allowed to publish")
+	}
+	if mayPublishEviction(Peer{ID: "w", RelayPeer: "another-relay"}) {
+		t.Fatal("a worker that is not the peer's relay must not publish")
+	}
+	if mayPublishEviction(Peer{ID: "w"}) {
+		t.Fatal("a worker must not publish when the peer advertises no relay")
 	}
 }
