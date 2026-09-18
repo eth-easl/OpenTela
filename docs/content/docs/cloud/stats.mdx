@@ -1,0 +1,50 @@
+---
+title: Network statistics
+description: Live usage and performance of the public OpenTela cloud at api.opentela.ai, straight from the gateway's permissionless analytics endpoints.
+---
+
+The public cloud samples every routed inference response — time to first token,
+throughput, token counts, GPU attribution — and publishes anonymized aggregates on
+permissionless endpoints. No API key, no account data, no prompts: only counters and
+timings, grouped by GPU model and served model.
+
+## Snapshot — September 18, 2026
+
+In the analytics pipeline's first day, the mesh served **48.4 million input tokens**
+and **374 thousand output tokens** across **563 requests**, with **0 cached input
+tokens** reported so far.
+
+| Served model | GPU | Requests | Input tokens | Cached input tokens | Output tokens |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| `zai-org/GLM-5.3-Flash` | NVIDIA GH200 120GB | 563 | 48.4 million | 0 | 374 thousand |
+
+Performance over the same window: **100% success rate**, ~**102 output tokens per
+second** on average (p50 103), time-to-first-token of **623 ms** at p50 and **809 ms**
+at p90.
+
+A note on the cached column: prompt-cache accounting is wired end to end, but an
+upstream only reports cache hits when it exposes them — none of the currently routed
+providers do, so it reads 0 until one does.
+
+Usage totals apply the same settlement predicate as billing (`success_only=1` by
+default): only responses whose usage the credit ledger would settle are counted, so
+the totals line up with what buyers are actually charged.
+
+## Fetch live numbers
+
+The snapshot above is static; the endpoints always serve current aggregates:
+
+```bash
+# performance percentiles + daily token usage, last 30 days
+curl "https://api.opentela.ai/v1/leaderboard?hours=720"
+
+# today only
+curl "https://api.opentela.ai/v1/leaderboard?hours=24"
+
+# include aborted/failed responses in the usage totals
+curl "https://api.opentela.ai/v1/leaderboard?hours=720&success_only=0"
+```
+
+The response pairs `entries` (GPU × model performance percentiles) with `usage`
+(per-day token totals). `window_days` is the requested window rounded up to whole
+days, capped at 30 — the raw-sample retention.

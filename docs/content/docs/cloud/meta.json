@@ -1,6 +1,7 @@
 {
   "title": "Public Cloud",
   "pages": [
-    "index"
+    "index",
+    "stats"
   ]
 }

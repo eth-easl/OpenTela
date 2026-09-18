@@ -226,12 +226,18 @@ response (TTFT, throughput, token counts, GPU attribution) and publishes a publi
 
 - **Tinybird Forward (managed, recommended):** the data project lives in the gateway
   repository's `tinybird/` directory. `tb deploy`, then export `TINYBIRD_HOST`,
-  `TINYBIRD_APPEND_TOKEN`, and `TINYBIRD_LEADERBOARD_TOKEN`. No tables or cron to manage — the
-  endpoint pipe aggregates raw samples and TTL lives in the datasource.
+  `TINYBIRD_APPEND_TOKEN`, `TINYBIRD_LEADERBOARD_TOKEN`, and `TINYBIRD_USAGE_TOKEN`. No tables
+  or cron to manage — the endpoint pipes aggregate raw samples and TTL lives in the datasource.
 - **Self-managed ClickHouse:** apply `clickhouse/schema.sql`, then set `CLICKHOUSE_URL`
   (plus `CLICKHOUSE_USERNAME`/`CLICKHOUSE_PASSWORD`).
 
 With neither configured the pipeline is fully inert and `/v1/leaderboard` is not mounted.
+
+The leaderboard response pairs the performance percentiles (`entries`) with a daily
+token-usage section (`usage` — input, cached input, and output tokens per served model
+day, applying the same settlement predicate as billing). See
+[Network statistics](/docs/cloud/stats) for a live snapshot of api.opentela.ai and the
+curl one-liners to fetch current numbers.
 
 ## Verify the deployment
 
