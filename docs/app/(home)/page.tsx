@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import LiveNetworkStats from './live-stats';
 
 const features: { title: string; description: string; icon: ReactNode }[] = [
   {
@@ -199,6 +200,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Live network stats — hidden when the analytics backend is down */}
+      <LiveNetworkStats />
 
       {/* Features */}
       <section className="mx-auto w-full max-w-6xl px-6 py-16">
