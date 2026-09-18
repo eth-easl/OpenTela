@@ -29,7 +29,7 @@ func TestCorsHeader_SetsCORSHeaders(t *testing.T) {
 	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
 	assert.Equal(t, "true", w.Header().Get("Access-Control-Allow-Credentials"))
 	assert.Equal(t, "GET,POST,PUT,PATCH,DELETE,OPTIONS", w.Header().Get("Access-Control-Allow-Methods"))
-	assert.Equal(t, "authorization, origin, content-type, accept, X-Otela-Fallback, X-Otela-Trust", w.Header().Get("Access-Control-Allow-Headers"))
+	assert.Equal(t, "authorization, origin, content-type, accept, X-Otela-Fallback, X-Otela-Trust, X-Session-Affinity", w.Header().Get("Access-Control-Allow-Headers"))
 }
 
 func TestCorsHeader_OptionsReturns200(t *testing.T) {

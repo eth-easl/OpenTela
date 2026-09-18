@@ -856,6 +856,30 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 		candidates = orderCandidatesByPrice(candidates, allowedPeerOrder)
 	}
 
+	// Affinity routing (X-Session-Affinity): when the client sends a stable
+	// key per conversation, the head biases selection toward the peer that
+	// previously served the same key — sticky sessions for KV-cache warmth
+	// across multi-turn conversations. The pin is looked up once here, after
+	// candidates are narrowed to the affordable, trusted, ACL-permitted set;
+	// selectAffinityPeer skips a pin that is no longer eligible or excluded
+	// by a failed retry, so the normal policy runs as a graceful fallback.
+	// The pin is refreshed after a successful forward below. Disabled by
+	// affinity.enabled=false; TTL defaults to affinity.ttl (10m).
+	affinityKey := ""
+	var affinityPinned string
+	if viper.GetBool("affinity.enabled") {
+		affinityKey = sanitizeAffinityKey(c.GetHeader(affinityHeader))
+		if affinityKey != "" {
+			if p, ok := globalAffinity.Get(affinityKey); ok {
+				affinityPinned = p
+			}
+		}
+	}
+	affinityTTL := viper.GetDuration("affinity.ttl")
+	if affinityTTL <= 0 {
+		affinityTTL = 10 * time.Minute
+	}
+
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		remaining := excludePeers(candidates, excluded)
 		if len(remaining) == 0 {
@@ -865,6 +889,12 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 		// Select peer
 		var targetPeer string
 		switch {
+		case selectAffinityPeer(remaining, affinityPinned) != "":
+			// Sticky: reuse the peer that previously served this affinity
+			// key for KV-cache warmth across multi-turn conversations. Falls
+			// through automatically when the pinned peer is excluded (failed
+			// earlier this request) or is no longer a candidate.
+			targetPeer = affinityPinned
 		case priceAware && attempt == 0:
 			// First pick: market signal — weight by price rank (cheapest
 			// affordable first) so load still spreads across the affordable
@@ -1016,6 +1046,13 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 		// Success (or streaming already committed to client)
 		if !rw.headersSent {
 			rw.flushToClient()
+		}
+		// Record/refresh the affinity pin: the peer that just served this
+		// request becomes the sticky target for the affinity key, so the
+		// next turn reuses its warm KV cache. A retried success re-pins to
+		// the peer that actually worked rather than the one that failed.
+		if affinityKey != "" {
+			globalAffinity.Put(affinityKey, targetPeer, affinityTTL)
 		}
 		if attempt > 0 {
 			routingRetriesTotal.WithLabelValues(serviceName, "succeeded_after_retry").Inc()

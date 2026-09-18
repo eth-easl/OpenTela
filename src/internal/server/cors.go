@@ -15,7 +15,7 @@ func corsHeader() gin.HandlerFunc {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 			c.Writer.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-			c.Writer.Header().Set("Access-Control-Allow-Headers", "authorization, origin, content-type, accept, X-Otela-Fallback, X-Otela-Trust")
+			c.Writer.Header().Set("Access-Control-Allow-Headers", "authorization, origin, content-type, accept, X-Otela-Fallback, X-Otela-Trust, X-Session-Affinity")
 		}
 		if c.Request.Method == "OPTIONS" {
 			c.Writer.WriteHeader(http.StatusOK)

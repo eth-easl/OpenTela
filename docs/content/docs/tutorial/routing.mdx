@@ -60,7 +60,7 @@ User ──► Head Node ──► Worker Node ──► Local Service (e.g. vLL
 
 1. **User → Head Node**: The user sends a request to `/v1/service/llm/v1/chat/completions` on the head node.
 2. **Candidate selection**: The head node reads the request body, queries the distributed node table for all peers that provide the `llm` service, and filters them by **identity group** (explained below).
-3. **Load balancing**: One candidate is selected at random from the matching set.
+3. **Load balancing**: One candidate is selected — by random, round-robin, shortest-queue, or price-weighted policy — unless a `X-Session-Affinity` pin reuses the peer that last served the conversation (see [Session affinity](#session-affinity-sticky-peers-for-kv-cache-warmth)).
 4. **P2P forwarding**: The request is forwarded over libp2p to the selected worker at `/v1/_service/llm/v1/chat/completions`.
 5. **Local forwarding**: The worker's Local Service Forward handler proxies the request to the local process (e.g., `localhost:8080` where vLLM is listening).
 6. **Response**: The response streams back through the same chain to the user. An `X-Computing-Node` header is added so the caller knows which peer served the request.
@@ -218,6 +218,39 @@ expensive 14% — a soft price signal that still spreads load and tolerates
 failures (retries exclude the failed peer and re-weight the remainder).
 `0` (default) keeps the legacy uniform policies exactly.
 
+### Session affinity (sticky peers for KV-cache warmth)
+
+Multi-turn conversations run faster and cheaper when successive turns land
+on the **same worker** — its KV (prefix) cache is already warm. A client
+opts in by sending one stable header value per conversation:
+
+```python
+headers = {"X-Session-Affinity": "conv-4f2a-...", ...}
+```
+
+The head keeps an in-memory, TTL'd map of `affinity-key → peer`. On each
+request it consults the map **after** narrowing candidates to the
+affordable, trusted, ACL-permitted set, and prefers the pinned peer when
+it is still a candidate. There is no hard pinning and no server-side
+conversation object — the model is best-effort:
+
+- **First turn** (no pin yet): the head selects normally (random /
+  round-robin / shortest-queue / price-weighted), then records the peer
+  that served.
+- **Later turns** (pin present): the head reuses the pinned peer for its
+  warm cache.
+- **Pinned peer gone / unaffordable / excluded by a retry**: the head
+  falls back to its normal policy and re-pins to the peer that *just*
+  served. No request is failed by a missing pin.
+
+Because the pin lives in the head's memory and carries a TTL
+(`affinity.ttl`, default `10m`, env `OF_AFFINITY_TTL`), stickiness holds
+while repeated turns arrive at the same head and within the TTL window.
+Disable with `affinity.enabled=false` (env `OF_AFFINITY_ENABLED`). The
+same `X-Session-Affinity` value is also mapped to `langfuse.session.id` by
+the billing gateway, so the conversation's turns group into one Langfuse
+session with zero extra header plumbing.
+
 ## Endpoints in detail
 
 ### Global Service Forward — `/v1/service/:service/*path`
@@ -234,6 +267,7 @@ This is the primary endpoint for users. It routes the request to a suitable work
 **Request headers**:
 
 - `X-Otela-Fallback` *(optional)* — controls how aggressively the router falls back to lower-priority providers. `0` (default) = exact only, `1` = allow wildcard, `2` = allow wildcard + catch-all. See [Priority and fallback](#priority-and-fallback).
+- `X-Session-Affinity` *(optional)* — a stable, client-chosen key for a conversation. The head reuses the peer that last served the same key (sticky sessions / KV-cache warmth), with graceful fallback. See [Session affinity](#session-affinity-sticky-peers-for-kv-cache-warmth).
 
 **Example** — send a chat completion request to any node serving `Qwen/Qwen3-8B`:
 

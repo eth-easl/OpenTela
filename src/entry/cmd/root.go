@@ -204,6 +204,15 @@ func initConfig(cmd *cobra.Command) error {
 	// twice as likely as the next. Env: OF_ROUTING_PRICE_WEIGHT_DECAY.
 	viper.SetDefault("routing.price_weight_decay", 0.0)
 
+	// Affinity routing: a client-supplied X-Session-Affinity key biases peer
+	//// selection toward the peer that last served the same key (sticky
+	// sessions / KV-cache warmth), with a graceful fallback to the
+	// configured LB policy when the pinned peer is unavailable. Disabled by
+	// affinity.enabled=false; pin lifetime is affinity.ttl (default 10m).
+	// Env: OF_AFFINITY_ENABLED, OF_AFFINITY_TTL.
+	viper.SetDefault("affinity.enabled", true)
+	viper.SetDefault("affinity.ttl", "10m")
+
 	// CRDT tuned values (used when scalability.crdt_tuned=true)
 	viper.SetDefault("crdt.tuned_gossipsub_d", 10)
 	viper.SetDefault("crdt.tuned_gossipsub_dlo", 4)
