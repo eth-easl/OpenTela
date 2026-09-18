@@ -21,6 +21,7 @@ Tela is the latin word for "Fabric", which refers to the interconnected network 
 
 ## Adoption
 
+- [teraflop-ai/model-serving](https://github.com/teraflop-ai/model-serving) provides minimal scripts of serving models on HPCs using OpenTela.
 - OpenTela is used to power [SwissAI Serving](https://serving.swissai.cscs.ch/). It acts as the decentralized orchestration layer, routing inference requests to distributed GPU nodes while managing state, metrics, and peer discovery to ensure resilient and scalable model serving.
 
 ## Documentation
