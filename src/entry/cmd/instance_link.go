@@ -38,7 +38,12 @@ it is usage-capped, expires, and can be revoked in the console at any time.
 
 Config equivalents (cfg.yaml or env, prefix OF_):
   instance.deploy_key, account.api_url
-  e.g. OF_INSTANCE_DEPLOY_KEY=otd-… otela instance link`,
+  e.g. OF_INSTANCE_DEPLOY_KEY=otd-… otela instance link
+
+The key is saved to ~/.config/opentela/keys/deploy_key (0600) after a
+successful link, so later 'otela start' runs re-confirm the link
+automatically — no flags needed. Re-links of the same account are free
+(no use spent).`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runInstanceLink(cmd); err != nil {
 			fmt.Printf("Link failed: %v\n", err)
@@ -47,46 +52,84 @@ Config equivalents (cfg.yaml or env, prefix OF_):
 	},
 }
 
-func runInstanceLink(cmd *cobra.Command) error {
-	// ── 1. The node's libp2p identity ────────────────────────────────
-	priv, err := protocol.LoadKeyFromFile(), error(nil)
+// nodeLinkSigner loads — or, on first use, mints and persists — the node's
+// libp2p identity key, and returns the derived PeerID plus a PeerSigner over
+// that identity. Shared by `otela instance link` and the boot-time link
+// check: linking and serving must present the same identity.
+func nodeLinkSigner() (string, account.PeerSigner, error) {
+	priv := protocol.LoadKeyFromFile()
 	if priv == nil {
 		// First run on this machine: mint the same identity the node will
 		// load on start, so linking and serving share one PeerID.
+		var err error
 		priv, err = protocol.GenerateAndWriteKey()
 		if err != nil {
-			return fmt.Errorf("create node identity key: %w", err)
+			return "", nil, fmt.Errorf("create node identity key: %w", err)
 		}
 	}
 	peerID, err := peerIDFromPriv(priv)
 	if err != nil {
-		return err
+		return "", nil, err
 	}
 	pubRaw, err := crypto.MarshalPublicKey(priv.GetPublic())
 	if err != nil {
-		return fmt.Errorf("marshal public key: %w", err)
+		return "", nil, fmt.Errorf("marshal public key: %w", err)
 	}
 	pubB64 := base64.StdEncoding.EncodeToString(pubRaw)
-	sign := account.PeerSigner(func(message []byte) (string, string, error) {
+	signer := account.PeerSigner(func(message []byte) (string, string, error) {
 		sig, err := priv.Sign(message)
 		if err != nil {
 			return "", "", err
 		}
 		return pubB64, base64.StdEncoding.EncodeToString(sig), nil
 	})
+	return peerID, signer, nil
+}
 
-	// ── 2. The deploy key ────────────────────────────────────────────
-	deployKey := viper.GetString("instance.deploy_key")
+// resolveDeployKey returns the deploy key with the documented precedence:
+// --deploy-key flag / OF_INSTANCE_DEPLOY_KEY / cfg.yaml (all read via the
+// "instance.deploy_key" viper key) first, then the file persisted by a
+// previous `otela instance link`.
+// resolveAPIBaseURL returns the control-plane origin: an explicitly passed
+// --api-url wins, then the account.api_url viper key (OF_ACCOUNT_API_URL or
+// cfg.yaml), then the production default. The explicit flag check is what
+// keeps instance link independent of wallet_link's binding of the same key.
+func resolveAPIBaseURL(cmd *cobra.Command) string {
+	if cmd != nil {
+		if f := cmd.Flags().Lookup("api-url"); f != nil && f.Changed {
+			return f.Value.String()
+		}
+	}
+	if v := viper.GetString("account.api_url"); v != "" {
+		return v
+	}
+	return account.DefaultAPIBaseURL
+}
+
+func resolveDeployKey() string {
+	if key := viper.GetString("instance.deploy_key"); key != "" {
+		return key
+	}
+	return protocol.LoadDeployKey()
+}
+
+func runInstanceLink(cmd *cobra.Command) error {
+	// ── 1. The node's libp2p identity ──────────────────────────────────
+	peerID, sign, err := nodeLinkSigner()
+	if err != nil {
+		return err
+	}
+
+	// ── 2. The deploy key ──────────────────────────────────────────
+	deployKey := resolveDeployKey()
 	if deployKey == "" {
 		return errors.New("no deploy key: pass --deploy-key otd-… (mint one in the " +
-			"console under Account → Instances → Deploy keys, or set OF_INSTANCE_DEPLOY_KEY)")
+			"console under Account → Instances → Deploy keys, set " +
+			"OF_INSTANCE_DEPLOY_KEY, or store one with a previous link)")
 	}
 
 	// ── 3. Challenge → sign → link ───────────────────────────────────
-	baseURL := viper.GetString("account.api_url")
-	if baseURL == "" {
-		baseURL = account.DefaultAPIBaseURL
-	}
+	baseURL := resolveAPIBaseURL(cmd)
 	ctx, cancel := context.WithTimeout(context.Background(), instanceLinkTimeout)
 	defer cancel()
 
@@ -106,6 +149,15 @@ func runInstanceLink(cmd *cobra.Command) error {
 	} else {
 		fmt.Printf("  Instance ID:  %d\n", linked.ID)
 	}
+
+	// Persist the key so future `otela start` runs re-confirm the link
+	// automatically (idempotent re-links spend no use).
+	if err := protocol.StoreDeployKey(deployKey); err != nil {
+		fmt.Printf("  (could not save the deploy key for auto-use at start: %v)\n", err)
+	} else if keyPath, pathErr := protocol.DeployKeyPath(); pathErr == nil {
+		fmt.Printf("  Key saved:    %s (future `otela start` runs link automatically)\n", keyPath)
+	}
+
 	fmt.Println("\nManage this node at:")
 	fmt.Println("  https://cloud.opentela.ai/account")
 	return nil
@@ -151,7 +203,10 @@ func init() {
 
 	_ = viper.BindPFlag("instance.deploy_key", instanceLinkCmd.Flags().Lookup("deploy-key"))
 	_ = viper.BindPFlag("instance.label", instanceLinkCmd.Flags().Lookup("label"))
-	_ = viper.BindPFlag("account.api_url", instanceLinkCmd.Flags().Lookup("api-url"))
+	// NOTE: --api-url deliberately has no BindPFlag: wallet_link.go binds
+	// "account.api_url" too, and a second binder on the same key shadows the
+	// first (last init wins — this flag silently broke once already).
+	// resolveAPIBaseURL reads this flag directly instead.
 
 	instanceCmd.AddCommand(instanceLinkCmd)
 	rootcmd.AddCommand(instanceCmd)

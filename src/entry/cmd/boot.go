@@ -25,7 +25,8 @@ const billingModeOff = "off"
 // before the node starts serving. It:
 //
 //  1. ensures a live session — a configured token is used as-is, otherwise
-//     email+password sign-in fetches a fresh JWT;
+//     email+password sign-in fetches a fresh JWT; with neither, a stored
+//     deploy key (from `otela instance link`) re-confirms the instance link;
 //  2. resolves the account (identity email + linked wallets) and checks that
 //     this node's default wallet is linked — an unlinked node still runs,
 //     but its peers cannot be claimed from the console;
@@ -34,10 +35,56 @@ const billingModeOff = "off"
 // Best-effort by design: the node must boot standalone, so every failure is
 // a prominent warning with the fix, never a boot error. The account link
 // matters for claiming peers and the API market, not for mesh liveness.
+// bootInstanceLink re-confirms this node's instance link using a stored
+// deploy key: the node signs a fresh challenge with its libp2p identity and
+// the control plane re-asserts the peer→account binding. Idempotent by
+// contract (same-account re-links spend no key use and keep the label), so
+// it is safe on every boot. Best-effort like the rest of bootAccount.
+func bootInstanceLink(deployKey string) {
+	peerID, signer, err := nodeLinkSigner()
+	if err != nil {
+		common.Logger.Warnf("Could not load the node identity for the deploy-key link check; continuing without an account link (%v)", err)
+		return
+	}
+
+	baseURL := viper.GetString("account.api_url")
+	if baseURL == "" {
+		baseURL = account.DefaultAPIBaseURL
+	}
+	client := &account.Client{BaseURL: baseURL, DeployKey: deployKey}
+
+	ctx, cancel := context.WithTimeout(context.Background(), bootAccountTimeout)
+	defer cancel()
+
+	linked, err := client.LinkInstance(ctx, peerID, "", signer)
+	if err != nil {
+		common.Logger.Warnf("Deploy-key link check failed; continuing without an account link (%v)", explainInstanceLinkError(err))
+		return
+	}
+	name := linked.Label
+	if name == "" {
+		name = linked.PeerID
+	}
+	if linked.Relinked {
+		common.Logger.Infof("Instance '%s' re-confirmed with your OpenTela Cloud account (id %d)", name, linked.ID)
+	} else {
+		common.Logger.Infof("Instance '%s' linked to your OpenTela Cloud account (id %d)", name, linked.ID)
+	}
+}
+
 func bootAccount(cmd *cobra.Command) {
 	token := viper.GetString("account.token")
 	email := viper.GetString("account.email")
 	if token == "" && email == "" {
+		// No account credentials on the node — that is the point of deploy
+		// keys. If one is stored (by `otela instance link` or
+		// `otela start --deploy-key`), use it to re-confirm the link. The
+		// re-link is idempotent and spends no use; revocation and expiry are
+		// detected here and surface as warnings, never boot errors.
+		if deployKey := resolveDeployKey(); deployKey != "" {
+			bootInstanceLink(deployKey)
+			return
+		}
 		common.Logger.Debug("No account credentials configured; skipping account resolution (standalone node)")
 		return
 	}
