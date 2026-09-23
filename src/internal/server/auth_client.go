@@ -474,7 +474,13 @@ func isKnownACLReason(reason string) bool {
 
 func isKnownACLReasonV2(reason string) bool {
 	switch reason {
-	case "instance_acl_allow",
+	// "api_key" is reserved for the control plane's consumer-key rule matches
+	// (model sharing via ACL): ship this whitelist fleet-wide BEFORE the API
+	// starts emitting it — an unlisted reason fails the whole evaluator
+	// response, and old cores must not reject new allow reasons.
+	// "no_match" is the control plane's ACL deny verdict; v2 validates every
+	// decision's reason, so it must be listed alongside the allow reasons.
+	case "instance_acl_allow", "api_key", "no_match",
 		"public", "owner", "email_domain", "wallet",
 		"unmanaged", "not_region_member", "membership_suspended", "membership_expired",
 		"membership_revoked", "ownership_mismatch", "ownership_unavailable",

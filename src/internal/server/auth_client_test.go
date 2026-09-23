@@ -680,3 +680,25 @@ func TestAuthorizeKeyHashForScopeRejectsEmpty(t *testing.T) {
 		t.Fatalf("status=%d, want 401", cpErr.Status)
 	}
 }
+
+func TestIsKnownACLReasonV2AcceptsApiKeyAndNoMatch(t *testing.T) {
+	// The control plane reuses "instance_acl_allow" for any instance/service
+	// ACL rule match and "no_match" for ACL denies on the v2 evaluator, and
+	// reserves "api_key" as the distinct allow reason for consumer-key rules
+	// (model sharing via ACL). An unlisted reason fails the entire evaluator
+	// response fail-closed, so every string the API can emit must be listed
+	// here BEFORE the API rolls the new reason out to the fleet.
+	for _, reason := range []string{"instance_acl_allow", "no_match", "api_key"} {
+		if !isKnownACLReasonV2(reason) {
+			t.Fatalf("isKnownACLReasonV2(%q) = false, want true", reason)
+		}
+	}
+	if isKnownACLReasonV2("bogus_reason") {
+		t.Fatal("isKnownACLReasonV2 accepted an unknown reason")
+	}
+	// v1 is legacy: its wire format carries no allow reasons (allowed peers
+	// ride allowed_peer_ids) and it must not gain "api_key".
+	if isKnownACLReason("api_key") {
+		t.Fatal("isKnownACLReason (v1) must not accept \"api_key\"")
+	}
+}
