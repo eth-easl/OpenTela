@@ -68,7 +68,12 @@ type Client struct {
 	// BaseURL is the control-plane origin, e.g. https://api.opentela.ai.
 	BaseURL string
 	// Bearer is the Neon Auth JWT identifying the operator's cloud account.
+	// Required for wallet linking; ignored when DeployKey is set.
 	Bearer string
+	// DeployKey is a scoped instance-linking token ("otd-...", minted in the
+	// console). It authorizes ONLY instance linking — never set both Bearer
+	// and DeployKey; DeployKey wins.
+	DeployKey string
 	// HTTP is optional; nil uses http.DefaultClient.
 	HTTP *http.Client
 }
@@ -98,7 +103,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, req, out any) 
 	if req != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
-	if c.Bearer != "" {
+	if c.DeployKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.DeployKey)
+	} else if c.Bearer != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.Bearer)
 	}
 
@@ -153,6 +160,80 @@ func (c *Client) LinkWallet(
 	if err := c.doJSON(ctx, http.MethodPost, "/manage/wallets",
 		map[string]string{"challenge_id": challenge.ID, "signature": sig},
 		&linked); err != nil {
+		return nil, err
+	}
+	return &linked, nil
+}
+
+// LinkedInstance is the server-confirmed result of a deploy-key link.
+type LinkedInstance struct {
+	ID              int64     `json:"id"`
+	PeerID          string    `json:"peer_id"`
+	Label           string    `json:"label"`
+	OwnerWallet     string    `json:"owner_wallet"`
+	Mode            string    `json:"mode"`
+	OwnershipStatus string    `json:"ownership_status"`
+	Relinked        bool      `json:"relinked,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// linkChallengeResponse mirrors the API's POST /internal/instances/link/challenges.
+type linkChallengeResponse struct {
+	ChallengeID string    `json:"challenge_id"`
+	PeerID      string    `json:"peer_id"`
+	Audience    string    `json:"audience"`
+	Nonce       string    `json:"nonce"`
+	IssuedAt    time.Time `json:"issued_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	Message     string    `json:"message"`
+}
+
+// PeerSigner signs the link challenge with the NODE's libp2p identity key.
+// It returns the base64-encoded protobuf-marshalled public key and the
+// base64-encoded signature over the exact message bytes. The private key
+// never leaves this process.
+type PeerSigner func(message []byte) (publicKeyB64, signatureB64 string, err error)
+
+// LinkInstance binds peerID to the account that issued the deploy key. The
+// caller proves control of the peer's libp2p key by signing the server's
+// single-use challenge; no wallet observation and no account JWT are
+// involved. The deploy key must be set on the client.
+//
+// Errors:
+//   - 401: the deploy key is unknown/revoked/expired.
+//   - 403: the key's use budget (max_uses) is exhausted.
+//   - 409: challenge expired/consumed, the peer is already claimed by
+//     another account, or the mesh observes the peer under a different
+//     wallet than the issuing account's.
+//   - 422: the account has no wallet linked (billing requires one).
+func (c *Client) LinkInstance(ctx context.Context, peerID string, label string, sign PeerSigner) (*LinkedInstance, error) {
+	if c.DeployKey == "" {
+		return nil, fmt.Errorf("link instance requires a deploy key (mint one in the console)")
+	}
+	var ch linkChallengeResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/internal/instances/link/challenges",
+		map[string]string{"peer_id": peerID}, &ch); err != nil {
+		return nil, err
+	}
+	if ch.ChallengeID == "" || ch.Message == "" {
+		return nil, fmt.Errorf("challenge response is missing id/message")
+	}
+	pubB64, sigB64, err := sign([]byte(ch.Message))
+	if err != nil {
+		return nil, fmt.Errorf("sign challenge: %w", err)
+	}
+	var linked LinkedInstance
+	req := map[string]string{
+		"peer_id":      peerID,
+		"challenge_id": ch.ChallengeID,
+		"nonce":        ch.Nonce,
+		"public_key":   pubB64,
+		"signature":    sigB64,
+	}
+	if label != "" {
+		req["label"] = label
+	}
+	if err := c.doJSON(ctx, http.MethodPost, "/internal/instances/link", req, &linked); err != nil {
 		return nil, err
 	}
 	return &linked, nil
