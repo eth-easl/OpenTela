@@ -1,0 +1,73 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M4TC34XQTYJ5E62907C3BWWD",
+  "session_id": "01a134aa-b4c6-70a9-abc1-0fc8880849d0",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-13T10:14:24.341874184Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "save_step_count": 2,
+  "files_touched": [
+    "src/internal/protocol/node_table.go",
+    "src/internal/wallet/identity.go"
+  ],
+  "agent": "Pi",
+  "model": "15 - DeepSeek-V4.1-Flash on JUWELS Booster",
+  "turn_id": "be02e4e7e816",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 4062178,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 28744,
+    "api_call_count": 92
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-13T10:14:24.285452858Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 2,
+    "total_committed": 0,
+    "total_lines_changed": 2,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 262,
+      "user_lines_removed": 2,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "src/internal/protocol/node_table.go": 40,
+        "src/internal/protocol/node_table_identity_test.go": 84,
+        "src/internal/wallet/derive.go": 37,
+        "src/internal/wallet/derive_test.go": 85,
+        "src/internal/wallet/identity.go": 16
+      },
+      "user_removed_per_file": {
+        "src/internal/wallet/identity.go": 2
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 262,
+      "agent_lines_removed": 2
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 355,
+      "agent_lines_removed": 20
+    }
+  ]
+}
