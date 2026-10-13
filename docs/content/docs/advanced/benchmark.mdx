@@ -10,7 +10,7 @@ OpenTela provides a simple way to spin up a large-scale, single-machine simulati
 The simulation leverages Docker Compose to spin up lightweight Linux containers rather than full virtual machines (e.g., Firecracker), which avoids the complexity of setting up hundreds of TAP interfaces and managing IP allocation manually.
 
 The environment consists of two main service types defined in `local-demo/simulation/docker-compose.yml`:
-- **`head-node`**: Acts as the first peer in the network. It always starts with a deterministic seed (`--seed 0`), fixed IP address, and static port mappings. This provides a stable bootstrap node for all other nodes to connect to.
+- **`head-node`**: Acts as the first peer in the network. It always starts with a fixed seed (`--seed 0`) plus a mounted identity key, fixed IP address, and static port mappings. This provides a stable bootstrap node for all other nodes to connect to.
 - **`worker`**: Simulates the compute nodes. The workers do not have fixed peer IDs, IPs, or host port mappings. This allows Docker Compose to scale them dynamically, with each replica generating a unique peer ID on startup.
 
 ## Running the Simulation

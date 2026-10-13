@@ -103,7 +103,7 @@ func newHost(ctx context.Context, seed int64, ds datastore.Batching) (host.Host,
 		priv = LoadKeyFromFile()
 		if priv == nil {
 			common.Logger.Debug("seed=0: no existing key file, generating and persisting new identity")
-			priv, err = GenerateAndWriteKey()
+			priv, err = GenerateAndWriteKey(0)
 			if err != nil {
 				return nil, err
 			}
@@ -116,8 +116,7 @@ func newHost(ctx context.Context, seed int64, ds datastore.Batching) (host.Host,
 		priv = LoadKeyFromFile()
 		if priv == nil {
 			common.Logger.Debugf("No existing key file, generating from seed=%d", seed)
-			r := mrand.New(mrand.NewSource(seed))
-			priv, _, err = crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, r)
+			priv, err = GenerateKeyFromSeed(seed)
 			if err != nil {
 				return nil, err
 			}

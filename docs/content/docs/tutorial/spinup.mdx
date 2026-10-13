@@ -12,13 +12,13 @@ The first node, or we call it the head node, is a standalone node that serves as
 Once you have OpenTela installed, you can spin up the head node with the following command:
 
 ```bash
-./otela start --mode standalone --public-addr {YOUR_IP_ADDR} --seed 0
+./otela start --mode standalone --public-addr {YOUR_IP_ADDR} --seed 1
 ```
 
 In the above command:
 - `--mode standalone` means this node will run in standalone mode, which is suitable for the head node.
 - `--public-addr {YOUR_IP_ADDR}` specifies the public IP address of this node, so that other nodes can connect to it. You should replace `{YOUR_IP_ADDR}` with the actual public IP address of your machine.
-- `--seed 0` sets the random seed to 0, and in this way you have a deterministic peer ID for this node, which is useful for the head node as other nodes will need to connect to it with its peer ID.
+- `--seed 1` derives the node's libp2p identity deterministically, so this node keeps the same peer ID across restarts and machines. This is useful for the head node because other nodes must connect to it by peer ID. Use a non-zero integer; `--seed 0` (the default) generates a random identity instead. You can also pre-generate the same identity without starting the node via `otela init --seed 1`.
 
 You should see the following output:
 
@@ -86,7 +86,7 @@ In the above command:
 - `--subprocess "vllm serve Qwen/Qwen3-8B --max_model_len 16384 --port 8080"` specifies the command to start the LLM serving subprocess. In this example, we use vLLM to serve the Qwen3-8B model, with a maximum model length of 16384 tokens, and listen on port 8080. You can replace this command with any other command to serve your desired LLM, as long as it listens on a specific port for incoming requests.
 - `--service.name llm` specifies the name of the service provided by this node, which is `llm` in this case. For LLM serving purpose, please do not modify/remove this flag, as OpenTela will use this information to route requests to the correct nodes.
 - `--service.port 8080` specifies the port number of the service provided by this node, which is 8080 in this case. This should be the same port number as the one used in the subprocess command.
-- `--seed 1` sets the random seed to 1, so that this worker node will randomly generate a different peer ID from the head node. You can also set it to any other number, or even remove this flag to have a random seed, as long as the peer ID of this worker node is different from the head node.
+- `--seed 1` derives this worker node's libp2p identity deterministically, producing a peer ID distinct from the head node's. You can also use `otela init --seed <n>` to pre-generate it, or omit the flag entirely for a random identity (the peer ID just needs to differ from the head node's).
 
 Once you run the above command, OpenTela will start the subprocess to serve the LLM, and connect this worker node to the head node.
 

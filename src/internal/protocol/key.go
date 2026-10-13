@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"crypto/rand"
+	mrand "math/rand"
 	"opentela/internal/common"
 	"os"
 	"path/filepath"
@@ -78,13 +79,37 @@ func LoadKeyFromFile() crypto.PrivKey {
 	return priv
 }
 
+// GenerateKeyFromSeed deterministically derives an Ed25519 libp2p identity
+// from an integer seed. The same seed always yields the same key, so callers
+// can assign stable, distinct PeerIDs (e.g. when several nodes share a $HOME
+// or in reproducible mesh benchmarks). It does not touch the filesystem.
+//
+// Ed25519 is used rather than RSA on purpose: Go's RSA key generation is not
+// reproducible from a seeded reader (it deliberately mixes in random bytes),
+// so an RSA-based seed could never yield a stable PeerID.
+func GenerateKeyFromSeed(seed int64) (crypto.PrivKey, error) {
+	r := mrand.New(mrand.NewSource(seed))
+	priv, _, err := crypto.GenerateEd25519Key(r)
+	if err != nil {
+		return nil, err
+	}
+	return priv, nil
+}
+
 // GenerateAndWriteKey generates a fresh RSA-2048 libp2p identity, persists it
 // via WriteKeyToFile, and returns the in-memory key so callers don't need to
 // re-load from disk. It is the same keygen flow used lazily by newHost when
 // seed=0 and no key exists, exposed so that `otela init` can pre-generate
-// the key without starting a libp2p host.
-func GenerateAndWriteKey() (crypto.PrivKey, error) {
-	priv, _, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, rand.Reader)
+// the key without starting a libp2p host. A non-zero seed derives the key
+// deterministically so the PeerID is reproducible across runs.
+func GenerateAndWriteKey(seed int64) (crypto.PrivKey, error) {
+	var priv crypto.PrivKey
+	var err error
+	if seed != 0 {
+		priv, err = GenerateKeyFromSeed(seed)
+	} else {
+		priv, _, err = crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, rand.Reader)
+	}
 	if err != nil {
 		return nil, err
 	}

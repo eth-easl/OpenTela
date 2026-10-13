@@ -62,7 +62,7 @@ func nodeLinkSigner() (string, account.PeerSigner, error) {
 		// First run on this machine: mint the same identity the node will
 		// load on start, so linking and serving share one PeerID.
 		var err error
-		priv, err = protocol.GenerateAndWriteKey()
+		priv, err = protocol.GenerateAndWriteKey(0)
 		if err != nil {
 			return "", nil, fmt.Errorf("create node identity key: %w", err)
 		}

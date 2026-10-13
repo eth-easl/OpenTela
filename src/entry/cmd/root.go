@@ -51,6 +51,7 @@ func init() {
 		"http://152.67.64.117:8092/v1/dnt/bootstraps",
 	}, "static bootstrap sources (HTTP URL, dnsaddr://, or multiaddr). Repeatable")
 	startCmd.Flags().String("seed", "0", "Seed")
+	initCmd.Flags().String("seed", "0", "Seed for deterministic libp2p identity generation (0 = random)")
 	startCmd.Flags().String("mode", "node", "Mode (standalone, local, full)")
 	startCmd.Flags().String("tcpport", "43905", "TCP Port")
 	startCmd.Flags().String("udpport", "59820", "UDP Port")
