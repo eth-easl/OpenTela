@@ -1,0 +1,9 @@
+Did we mention in the @docs/ that a shared $HOME might cause conflicts? Can you double check if this is the case?
+
+---
+
+I think we should also be able to provide --seed
+
+---
+
+ok commit the current wip and push to remote

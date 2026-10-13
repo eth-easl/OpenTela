@@ -1,0 +1,47 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M4TC3GYSW0FQSHZM0RJJE6S4",
+  "session_id": "01a134aa-b4c6-70a9-abc1-0fc8880849d0",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-13T10:14:36.649488612Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "save_step_count": 1,
+  "files_touched": [
+    "docs/content/docs/advanced/benchmark.mdx",
+    "docs/content/docs/tutorial/spinup.mdx",
+    "src/entry/cmd/init.go",
+    "src/entry/cmd/init_test.go",
+    "src/entry/cmd/instance_link.go",
+    "src/entry/cmd/peerid_test.go",
+    "src/entry/cmd/root.go",
+    "src/internal/protocol/host.go",
+    "src/internal/protocol/key.go"
+  ],
+  "agent": "Pi",
+  "model": "15 - DeepSeek-V4.1-Flash on JUWELS Booster",
+  "turn_id": "be02e4e7e816",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 4142829,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 29165,
+    "api_call_count": 93
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-13T10:14:36.599676407Z",
+    "agent_lines": 93,
+    "agent_removed": 18,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 93,
+    "total_lines_changed": 111,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
