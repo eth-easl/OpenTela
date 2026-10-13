@@ -41,10 +41,24 @@ func SignIdentity(peerID string, timestamp int64, wm *WalletManager) (*IdentityA
 	if pubKey == "" {
 		return nil, fmt.Errorf("no public key available")
 	}
+	return SignIdentityWithKey(peerID, timestamp, ed25519.PrivateKey(privKey), pubKey)
+}
+
+// SignIdentityWithKey creates a signed attestation binding a peer ID to the
+// Ed25519 key held by privKey. pubkeyB58 must be the base58 encoding of
+// privKey's public half; it is embedded as the attested WalletPubkey so the
+// resulting record is byte-identical in shape to a wallet-signed one.
+func SignIdentityWithKey(peerID string, timestamp int64, privKey ed25519.PrivateKey, pubkeyB58 string) (*IdentityAttestation, error) {
+	if len(privKey) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("invalid ed25519 private key size %d", len(privKey))
+	}
+	if pubkeyB58 == "" {
+		return nil, fmt.Errorf("no public key available")
+	}
 
 	payload := identityPayload{
 		PeerID:       peerID,
-		WalletPubkey: pubKey,
+		WalletPubkey: pubkeyB58,
 		Timestamp:    timestamp,
 	}
 	msg, err := json.Marshal(payload)
@@ -56,7 +70,7 @@ func SignIdentity(peerID string, timestamp int64, wm *WalletManager) (*IdentityA
 
 	return &IdentityAttestation{
 		PeerID:       peerID,
-		WalletPubkey: pubKey,
+		WalletPubkey: pubkeyB58,
 		Timestamp:    timestamp,
 		Signature:    base64.StdEncoding.EncodeToString(sig),
 	}, nil
