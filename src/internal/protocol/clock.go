@@ -7,6 +7,7 @@ import (
 	"opentela/internal/common"
 	"opentela/internal/common/process"
 	"os"
+	"strings"
 	"time"
 
 	ds "github.com/ipfs/go-datastore"
@@ -114,7 +115,20 @@ func StartTicker() {
 		// This used to skip every service-carrying peer outright, which is what
 		// made dead LLM workers permanently un-evictable. See decideSweepAction.
 		now := time.Now()
+		selfID := ""
+		if h, _ := GetP2PNode(nil); h != nil {
+			selfID = h.ID().String()
+		}
 		for id, p := range *GetAllPeers() {
+			// Never sweep our own row. Its LastSeen is only stamped at
+			// startup — the liveness tick pings everyone except self — so a
+			// service-less head (no ReannounceLocalServices heartbeats either)
+			// would otherwise be marked disconnected after peerDisconnectAfter
+			// and deleted after peerStaleAfter, silently removing itself from
+			// /v1/dnt/bootstraps until the next restart.
+			if selfID != "" && strings.Trim(id, "/") == selfID {
+				continue
+			}
 			switch decideSweepAction(p, probeUnknown, now) {
 			case sweepDelete:
 				common.Logger.Debugf("Removing stale peer %s (last seen %v)", id, time.Unix(p.LastSeen, 0))

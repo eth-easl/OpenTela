@@ -242,11 +242,20 @@ func probeUnreachableServicePeers() {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, probeMaxConcurrent)
 
+	selfID := ""
+	if h, _ := GetP2PNode(nil); h != nil {
+		selfID = h.ID().String()
+	}
 	for id, p := range *GetAllPeers() {
 		if !p.Connected || len(p.Service) == 0 {
 			continue
 		}
 		peerID := strings.TrimPrefix(id, "/")
+		if selfID != "" && peerID == selfID {
+			// Never probe/evict our own row: a reservation hiccup on our own
+			// relay must not retire this node from its own table.
+			continue
+		}
 		if IsDirectlyConnected(peerID) {
 			continue
 		}
