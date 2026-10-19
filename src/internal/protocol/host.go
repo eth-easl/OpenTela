@@ -364,6 +364,9 @@ func StartAutoReconnect(ctx context.Context) {
 	autoReconnectOnce.Do(func() {
 		host, _ := GetP2PNode(nil)
 		go startAutoReconnect(ctx, host)
+		if viper.GetString("public-addr") == "" {
+			go startConnectivityWatchdog(ctx, host)
+		}
 	})
 }
 
@@ -770,11 +773,12 @@ func MakeRelayReservations() {
 		}
 		ai := peer.AddrInfo{ID: p, Addrs: h.Peerstore().Addrs(p)}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_, err := relayClient.Reserve(ctx, h, ai)
+		rsvp, err := relayClient.Reserve(ctx, h, ai)
 		cancel()
 		if err != nil {
 			common.Logger.Debugf("Relay reservation on %s failed: %v", p.String()[:12], err)
 		} else {
+			setRelayReservation(rsvp.Expiration)
 			common.Logger.Infof("Relay reservation on %s succeeded", p.String()[:12])
 			if reservedRelay == "" {
 				reservedRelay = p.String()
