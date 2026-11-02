@@ -328,6 +328,10 @@ func newHost(ctx context.Context, seed int64, ds datastore.Batching) (host.Host,
 		},
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			common.Logger.Debugf("Disconnected from peer: %s  conns=%d", c.RemotePeer(), len(n.Conns()))
+			// A relay v2 reservation dies with the connection it was made on.
+			if n.Connectedness(c.RemotePeer()) != network.Connected {
+				forgetRelayReservation(c.RemotePeer())
+			}
 			// Mark peer as disconnected — only update existing peers.
 			go func(pid peer.ID) {
 				if pid == host.ID() {
@@ -364,7 +368,7 @@ func StartAutoReconnect(ctx context.Context) {
 	autoReconnectOnce.Do(func() {
 		host, _ := GetP2PNode(nil)
 		go startAutoReconnect(ctx, host)
-		if viper.GetString("public-addr") == "" {
+		if connectivityWatchdogEnabled() {
 			go startConnectivityWatchdog(ctx, host)
 		}
 	})
@@ -425,25 +429,17 @@ func startAutoReconnect(ctx context.Context, h host.Host) {
 }
 
 func tryReconnectToBootstraps(ctx context.Context, h host.Host, dialTimeout time.Duration) bool {
-	mode := viper.GetString("mode")
-	addrs := getDefaultBootstrapPeers(nil, mode)
-	if len(addrs) == 0 {
+	// Re-resolve discovery sources on every reconnect attempt; the cache
+	// keeps the last known set if resolution fails.
+	bootstraps.refresh(h.ID())
+	peerInfos := bootstraps.list()
+	if len(peerInfos) == 0 {
 		common.Logger.Debug("Reconnect attempt skipped: no bootstrap addresses configured")
-		return false
-	}
-
-	peerInfos, err := peer.AddrInfosFromP2pAddrs(addrs...)
-	if err != nil {
-		common.Logger.Debug("Failed to parse bootstrap peers during reconnect: ", err)
 		return false
 	}
 
 	successes := 0
 	for _, info := range peerInfos {
-		if info.ID == h.ID() {
-			continue
-		}
-
 		if h.Network().Connectedness(info.ID) == network.Connected {
 			successes++
 			continue
@@ -766,7 +762,13 @@ func MakeRelayReservations() {
 		common.Logger.Debug("MakeRelayReservations: host not ready, skipping")
 		return
 	}
-	var reservedRelay string
+	if !relayReservationsRunning.CompareAndSwap(false, true) {
+		common.Logger.Debug("MakeRelayReservations: already running, skipping")
+		return
+	}
+	defer relayReservationsRunning.Store(false)
+
+	var reserved []peer.ID
 	for _, p := range h.Network().Peers() {
 		if p == h.ID() {
 			continue
@@ -778,13 +780,12 @@ func MakeRelayReservations() {
 		if err != nil {
 			common.Logger.Debugf("Relay reservation on %s failed: %v", p.String()[:12], err)
 		} else {
-			setRelayReservation(rsvp.Expiration)
+			recordRelayReservation(p, rsvp.Expiration)
 			common.Logger.Infof("Relay reservation on %s succeeded", p.String()[:12])
-			if reservedRelay == "" {
-				reservedRelay = p.String()
-			}
+			reserved = append(reserved, p)
 		}
 	}
+	reservedRelay := pickAdvertisedRelay(h, reserved)
 	// Store the relay peer ID in our own CRDT entry so head nodes
 	// know which relay to route through to reach us.
 	if reservedRelay != "" && GetSelf().RelayPeer != reservedRelay {
@@ -792,6 +793,26 @@ func MakeRelayReservations() {
 		ReannounceLocalServices()
 		common.Logger.Infof("Registered relay peer %s in CRDT", reservedRelay[:12])
 	}
+}
+
+// pickAdvertisedRelay chooses the relay to advertise in the CRDT. It keeps the
+// current RelayPeer while it still holds a valid reservation, so the advertised
+// relay does not churn with peer iteration order. Otherwise it prefers a
+// freshly reserved bootstrap peer, then any freshly reserved peer. Returns ""
+// when there is nothing to advertise.
+func pickAdvertisedRelay(h host.Host, reserved []peer.ID) string {
+	if advertisedRelayValid(h) {
+		return GetSelf().RelayPeer
+	}
+	for _, p := range reserved {
+		if bootstraps.contains(p) {
+			return p.String()
+		}
+	}
+	if len(reserved) > 0 {
+		return reserved[0].String()
+	}
+	return ""
 }
 
 // TryHolePunch invokes DCUtR (Direct Connection Upgrade through Relay) for the
