@@ -77,12 +77,17 @@ func bootAccount(cmd *cobra.Command) {
 	email := viper.GetString("account.email")
 	if token == "" && email == "" {
 		// No account credentials on the node — that is the point of deploy
-		// keys. If one is stored (by `otela instance link` or
-		// `otela start --deploy-key`), use it to re-confirm the link. The
-		// re-link is idempotent and spends no use; revocation and expiry are
-		// detected here and surface as warnings, never boot errors.
+		// keys. Linking at boot is opt-in (instance.auto_link, or an explicit
+		// `otela start --deploy-key`): each new peer ID spends a key use, so
+		// nodes that mint fresh identities would otherwise drain the key on
+		// every restart. Revocation and expiry surface as warnings, never
+		// boot errors.
 		if deployKey := resolveDeployKey(); deployKey != "" {
-			bootInstanceLink(deployKey)
+			if viper.GetBool("instance.auto_link") {
+				bootInstanceLink(deployKey)
+			} else {
+				common.Logger.Info("Deploy key found but auto-link is off; run `otela instance link` or start with --auto-link to link this node")
+			}
 			return
 		}
 		common.Logger.Debug("No account credentials configured; skipping account resolution (standalone node)")

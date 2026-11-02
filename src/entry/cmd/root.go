@@ -57,6 +57,7 @@ func init() {
 	// --datadir must not stick to later runs. initConfig applies them like --seed.
 	startCmd.Flags().Bool(protocol.EphemeralIdentityKey, false, "generate a fresh peer identity for this process only, without reading or writing a key file (overrides --seed; env OF_EPHEMERAL_IDENTITY)")
 	startCmd.Flags().String("datadir", "", "directory for node data: peer database in <datadir>/ocfcore, usage store in <datadir>/usage (default ~/.ocfcore and ~/.otela; a per-process temp dir with --ephemeral-identity)")
+	initCmd.Flags().String("seed", "0", "Seed for deterministic libp2p identity generation (0 = random)")
 	startCmd.Flags().String("mode", "node", "Mode (standalone, local, full)")
 	startCmd.Flags().String("tcpport", "43905", "TCP Port")
 	startCmd.Flags().String("udpport", "59820", "UDP Port")

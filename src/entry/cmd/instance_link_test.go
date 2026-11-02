@@ -25,6 +25,7 @@ func resetLinkConfig(t *testing.T) {
 	keys := []string{"instance.deploy_key", "instance.label", "account.api_url", "account.token", "account.email"}
 	t.Cleanup(func() {
 		viper.Set("config_dir", "")
+		viper.Set("instance.auto_link", false)
 		for _, k := range keys {
 			viper.Set(k, "")
 		}
@@ -206,6 +207,7 @@ func TestBootAccountPrefersDeployKeyWithoutAccountCreds(t *testing.T) {
 
 	viper.Set("account.api_url", srv.URL)
 	viper.Set("instance.deploy_key", "otd-test")
+	viper.Set("instance.auto_link", true)
 
 	bootAccount(&cobra.Command{}) // deploy-key branch: no account token/email needed
 
@@ -291,5 +293,21 @@ func TestNodeLinkSignerRejectsBadSeed(t *testing.T) {
 
 	if _, _, err := nodeLinkSigner(); err == nil {
 		t.Fatal("expected an error for a non-integer seed")
+	}
+}
+
+func TestBootAccountSkipsDeployKeyLinkByDefault(t *testing.T) {
+	resetLinkConfig(t)
+	var calls []string
+	srv := linkStubServer(t, http.StatusOK, `{"id":9,"peer_id":"p","relinked":true}`, &calls)
+	defer srv.Close()
+
+	viper.Set("account.api_url", srv.URL)
+	viper.Set("instance.deploy_key", "otd-test")
+
+	bootAccount(&cobra.Command{}) // auto-link off: a stored key alone must not link
+
+	if len(calls) != 0 {
+		t.Fatalf("bootAccount linked without auto-link, calls: %v", calls)
 	}
 }

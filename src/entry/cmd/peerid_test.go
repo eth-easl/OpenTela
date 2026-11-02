@@ -18,7 +18,7 @@ func TestPeerIDCommand_PrintsPeerID(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(viper.Reset)
 	viper.Set("config_dir", dir)
-	_, err = protocol.GenerateAndWriteKey()
+	_, err = protocol.GenerateAndWriteKey(0)
 	assert.NoError(t, err)
 
 	var out bytes.Buffer
@@ -35,7 +35,7 @@ func TestPeerIDCommand_WarnsUnderEphemeralIdentity(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(viper.Reset)
 	viper.Set("config_dir", t.TempDir())
-	_, err := protocol.GenerateAndWriteKey()
+	_, err := protocol.GenerateAndWriteKey(0)
 	assert.NoError(t, err)
 	viper.Set(protocol.EphemeralIdentityKey, true)
 

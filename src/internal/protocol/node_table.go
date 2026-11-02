@@ -223,6 +223,29 @@ type Peer struct {
 	ServiceNameCounts map[string]int `json:"service_name_counts,omitempty"`
 }
 
+// deployKeyIdentity derives the Owner pubkey and identity attestation for a
+// wallet-less node that is linked to OpenTela Cloud via a deploy key. ok is
+// false when no deploy key is stored (standalone node) or derivation/signing
+// fails. The derived pubkey becomes Peer.Owner so the published record stays
+// self-consistent: Owner == IdentityAttestation.WalletPubkey.
+func deployKeyIdentity(peerID string) (string, *wallet.IdentityAttestation, bool) {
+	deployKey := LoadDeployKey()
+	if deployKey == "" {
+		return "", nil, false
+	}
+	priv, pub, err := wallet.DeriveIdentityKeyFromDeployKey(deployKey)
+	if err != nil {
+		common.Logger.Warnf("Could not derive deploy-key identity: %v", err)
+		return "", nil, false
+	}
+	att, err := wallet.SignIdentityWithKey(peerID, time.Now().Unix(), priv, pub)
+	if err != nil {
+		common.Logger.Warnf("Could not sign deploy-key identity attestation: %v", err)
+		return "", nil, false
+	}
+	return pub, att, true
+}
+
 // parseLabels turns repeated --label key=value entries from viper into a map.
 // Malformed entries (no '=' or empty key) are dropped with a debug log.
 func parseLabels() map[string]string {
@@ -679,6 +702,23 @@ func InitializeMyself(walletPubkeyOverride string, wm *wallet.WalletManager) {
 			myself.IdentityAttestation = att
 			myself.TrustLevel = TrustSelfAttested
 			common.Logger.Info("Identity attestation signed (self-attested)")
+		}
+	}
+
+	// Deploy-key-only nodes: no wallet is configured, but the node may be
+	// linked to OpenTela Cloud through a deploy key (`otela instance link`
+	// or `otela start --deploy-key`). The cloud's live ownership checks and
+	// peers' trust computations expect a self-consistent identity record
+	// (Owner == attested pubkey, valid signature), which previously only
+	// wallet-backed nodes could publish. Derive a stable Ed25519 attestation
+	// key from the stored deploy key so wallet-less nodes attest under an
+	// identity rooted in the same secret that authorizes their cloud link.
+	if myself.Owner == "" && myself.IdentityAttestation == nil {
+		if owner, att, ok := deployKeyIdentity(myself.ID); ok {
+			myself.Owner = owner
+			myself.IdentityAttestation = att
+			myself.TrustLevel = TrustSelfAttested
+			common.Logger.Info("Identity attestation signed (deploy-key derived; no wallet configured)")
 		}
 	}
 

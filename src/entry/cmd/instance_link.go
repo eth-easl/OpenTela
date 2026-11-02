@@ -41,9 +41,10 @@ Config equivalents (cfg.yaml or env, prefix OF_):
   e.g. OF_INSTANCE_DEPLOY_KEY=otd-… otela instance link
 
 The key is saved to ~/.config/opentela/keys/deploy_key (0600) after a
-successful link, so later 'otela start' runs re-confirm the link
-automatically — no flags needed. Re-links of the same account are free
-(no use spent).`,
+successful link. Later 'otela start' runs do NOT re-link by default; pass
+--auto-link (or set instance.auto_link: true / OF_INSTANCE_AUTO_LINK=true)
+to re-confirm the link at every boot. Re-links of the same peer are free,
+but every new peer ID spends a use.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runInstanceLink(cmd); err != nil {
 			fmt.Printf("Link failed: %v\n", err)
