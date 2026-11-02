@@ -25,14 +25,28 @@ import (
 // bridges, so the head can only reach workers through the relay, exactly like
 // a cloud head reaching SLURM workers through the Euler relay:
 //
-//	pub  (10.213.10.0/24): head, relay
+//	pub  (11.213.10.0/24): head, relay
 //	priv (10.213.11.0/24): relay, worker-0, worker-1
+//
+// The pub subnet must be one libp2p classifies as public. AutoRelay drops a
+// relay's private addresses when it builds circuit addresses, so with an
+// RFC 1918 pub subnet workers would advertise no /p2p-circuit address at all
+// and the head could never dial them through the relay. 11.0.0.0/8 is
+// publicly routable space; the isolated bridge only captures this /24 for the
+// duration of the test.
+//
+// Each scenario checks both paths from the head to a worker:
+//
+//   - relay hop: the head forwards HTTP to the relay, which forwards to the
+//     worker over its direct connection (the gateway's service path);
+//   - circuit: the head dials the worker itself over a relay v2 circuit. This
+//     only works while the worker holds a live reservation on the relay.
 //
 // Scenarios:
 //
 //  1. Baseline: worker-0 starts normally. It must report "Connectivity OK",
-//     advertise the relay as its RelayPeer, and be reachable from the head via
-//     the relay hop the gateway uses (/v1/p2p/<relay>/v1/p2p/<worker>/...).
+//     advertise the relay as its RelayPeer, and be reachable from the head on
+//     both paths.
 //  2. Startup race: the relay is cut off from priv while worker-1 starts, so
 //     its startup bootstrap dial and reservation fail. After the relay comes
 //     back, the watchdog must recover worker-1 without a restart.
@@ -162,7 +176,7 @@ func TestRelayWatchdogMesh(t *testing.T) {
 const (
 	rwPubNet       = "opentela-rw-pub"
 	rwPrivNet      = "opentela-rw-priv"
-	rwPubSubnet    = "10.213.10"
+	rwPubSubnet    = "11.213.10"
 	rwPrivSubnet   = "10.213.11"
 	rwBaseHostPort = baseHostPort + 300
 )
@@ -240,36 +254,55 @@ func waitLog(t *testing.T, n rwNode, substr string, after int, timeout time.Dura
 }
 
 // waitRoutable waits until the head's node table shows the worker advertising
-// the relay as its RelayPeer, and a request from the head reaches the worker
-// through the relay hop the gateway uses.
+// the relay as its RelayPeer, and the head reaches the worker's health
+// endpoint both through the relay hop and over a relay v2 circuit.
 func waitRoutable(t *testing.T, head rwNode, relayID string, w rwNode, wID string, timeout time.Duration) {
 	t.Helper()
-	client := &http.Client{Timeout: 15 * time.Second}
 	hopURL := fmt.Sprintf("http://127.0.0.1:%d/v1/p2p/%s/v1/p2p/%s/v1/health", head.hostPort, relayID, wID)
+	circuitURL := fmt.Sprintf("http://127.0.0.1:%d/v1/p2p/%s/v1/health", head.hostPort, wID)
 	var lastRelay, lastErr string
+	hopOK, circuitOK := false, false
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		lastRelay = advertisedRelay(head, wID)
 		if lastRelay == relayID {
-			resp, err := client.Get(hopURL)
-			if err == nil {
-				body, _ := io.ReadAll(resp.Body)
-				_ = resp.Body.Close()
-				// Check the body as well: a 200 must come from the
-				// worker's health endpoint, not from a proxy on the way.
-				if resp.StatusCode == http.StatusOK && strings.Contains(string(body), `"status":"ok"`) {
-					t.Logf("%s routable from head via relay", w.name)
-					return
+			var err string
+			if !hopOK {
+				if hopOK, err = healthOK(hopURL); !hopOK {
+					lastErr = "relay hop: " + err
 				}
-				lastErr = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-			} else {
-				lastErr = err.Error()
+			}
+			if hopOK && !circuitOK {
+				if circuitOK, err = healthOK(circuitURL); !circuitOK {
+					lastErr = "circuit: " + err
+				}
+			}
+			if hopOK && circuitOK {
+				t.Logf("%s routable from head (relay hop and circuit)", w.name)
+				return
 			}
 		}
 		time.Sleep(2 * time.Second)
 	}
-	t.Fatalf("%s not routable from head within %s (advertised relay=%q, want %q; last error: %s)",
-		w.name, timeout, lastRelay, relayID, lastErr)
+	t.Fatalf("%s not routable from head within %s (advertised relay=%q, want %q; relay hop ok=%v, circuit ok=%v; last error: %s)",
+		w.name, timeout, lastRelay, relayID, hopOK, circuitOK, lastErr)
+}
+
+// healthOK GETs a /v1/health URL and reports whether the worker answered.
+// The body is checked as well: a 200 must come from the worker's health
+// endpoint, not from a proxy on the way.
+func healthOK(u string) (bool, string) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(u)
+	if err != nil {
+		return false, err.Error()
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode == http.StatusOK && strings.Contains(string(body), `"status":"ok"`) {
+		return true, ""
+	}
+	return false, fmt.Sprintf("HTTP %d: %.120s", resp.StatusCode, strings.TrimSpace(string(body)))
 }
 
 // advertisedRelay returns the RelayPeer the head's node table holds for id.
