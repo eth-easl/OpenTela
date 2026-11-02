@@ -24,7 +24,7 @@ endif
 
 # Dependency versions
 GOTESTSUM_VERSION ?= 0.4.2
-GOLANGCI_VERSION ?= 2.6.1
+GOLANGCI_VERSION ?= 2.15.0
 # Default flags for golangci-lint
 GOLANGCI_FLAGS ?= --timeout=5m
 LINT_PKGS ?= ./...
