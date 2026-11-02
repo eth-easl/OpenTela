@@ -245,28 +245,42 @@ func TestNodeLinkSignerUsesEphemeralIdentity(t *testing.T) {
 	}
 }
 
-func TestNodeLinkSignerMatchesHostIdentityForSeed(t *testing.T) {
-	// A seeded node must link the identity it will serve with: both paths
-	// go through protocol.NodeIdentity, so the first one to run mints the key
-	// from the seed and the other loads it.
+func TestNodeLinkSignerRefusesSeededIdentity(t *testing.T) {
+	// A seed-derived key is guessable; it must never be linked to an account,
+	// and the refusal must not mint a key file as a side effect.
 	resetLinkConfig(t)
 	viper.Set("seed", "7")
 	t.Cleanup(func() { viper.Set("seed", "") })
 
-	peerID, _, err := nodeLinkSigner()
-	if err != nil {
-		t.Fatalf("nodeLinkSigner: %v", err)
+	if _, _, err := nodeLinkSigner(); err == nil {
+		t.Fatal("expected nodeLinkSigner to refuse a seeded identity")
 	}
-	served, err := protocol.NodeIdentity(7)
+	keyPath, err := protocol.ResolveKeyPath()
 	if err != nil {
-		t.Fatalf("NodeIdentity: %v", err)
+		t.Fatalf("ResolveKeyPath: %v", err)
 	}
-	want, err := peerIDFromPriv(served)
-	if err != nil {
-		t.Fatalf("peerIDFromPriv: %v", err)
+	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
+		t.Fatalf("a key file was written at %s (stat err %v)", keyPath, err)
 	}
-	if peerID != want {
-		t.Fatalf("linked peer %s, but the node serves as %s", peerID, want)
+}
+
+func TestRunInstanceLinkRefusesEphemeralIdentity(t *testing.T) {
+	// OF_EPHEMERAL_IDENTITY reaches every command; a standalone link would
+	// spend a key use on an identity that dies with this process.
+	resetLinkConfig(t)
+	var calls []string
+	srv := linkStubServer(t, http.StatusOK, `{"id":9,"peer_id":"p"}`, &calls)
+	defer srv.Close()
+	viper.Set("account.api_url", srv.URL)
+	viper.Set("instance.deploy_key", "otd-test")
+	viper.Set(protocol.EphemeralIdentityKey, true)
+	t.Cleanup(func() { viper.Set(protocol.EphemeralIdentityKey, false) })
+
+	if err := runInstanceLink(&cobra.Command{}); err == nil {
+		t.Fatal("expected runInstanceLink to refuse an ephemeral identity")
+	}
+	if len(calls) != 0 {
+		t.Fatalf("no control-plane call expected, got %v", calls)
 	}
 }
 

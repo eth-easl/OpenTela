@@ -57,10 +57,18 @@ automatically — no flags needed. Re-links of the same account are free
 // returns the derived PeerID plus a PeerSigner over that identity. Shared by
 // `otela instance link` and the boot-time link check: linking and serving
 // must present the same identity.
+//
+// A seeded identity is refused: its private key is derivable from a small
+// integer, so anyone who guesses the seed could sign as this peer. Seeds are
+// for tests and benchmarks, never for an account-linked node.
 func nodeLinkSigner() (string, account.PeerSigner, error) {
 	seed, err := protocol.ConfiguredSeed()
 	if err != nil {
 		return "", nil, err
+	}
+	if seed != 0 && !viper.GetBool(protocol.EphemeralIdentityKey) {
+		return "", nil, fmt.Errorf("refusing to link a seeded identity (seed=%d): its key is derivable "+
+			"from the seed and is for testing only; run without --seed to link this node", seed)
 	}
 	priv, err := protocol.NodeIdentity(seed)
 	if err != nil {
@@ -114,6 +122,14 @@ func resolveDeployKey() string {
 
 func runInstanceLink(cmd *cobra.Command) error {
 	// ── 1. The node's libp2p identity ──────────────────────────────────
+	// An ephemeral identity dies with this process, so linking it here would
+	// spend a deploy-key use on a peer that never comes online. It can only
+	// be linked by the node that serves with it, at boot.
+	if viper.GetBool(protocol.EphemeralIdentityKey) {
+		return fmt.Errorf("%s is set: an ephemeral identity lives only as long as its node "+
+			"process, so it cannot be linked from here; unset it to link the persisted identity",
+			protocol.EphemeralIdentityEnv)
+	}
 	peerID, sign, err := nodeLinkSigner()
 	if err != nil {
 		return err
