@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 )
 
@@ -96,6 +98,10 @@ func TestRelayWatchdogMesh(t *testing.T) {
 	t.Logf("worker-0 %s", w0ID)
 	waitLog(t, w0, "Connectivity OK", 0, 90*time.Second)
 	waitRoutable(t, head, relayID, w0, w0ID, 90*time.Second)
+
+	// A forward to a peer nobody can reach must fail with a 5xx, not a 200
+	// carrying an "ERROR: ..." body.
+	requireForwardFails(t, head, randomPeerID(t))
 
 	// ---- Scenario 2: startup race -------------------------------------------
 	t.Log("Scenario 2: worker starts while the relay is unreachable")
@@ -249,8 +255,8 @@ func waitRoutable(t *testing.T, head rwNode, relayID string, w rwNode, wID strin
 			if err == nil {
 				body, _ := io.ReadAll(resp.Body)
 				_ = resp.Body.Close()
-				// The p2p forward error handler writes "ERROR: ..." with
-				// status 200, so the body must be checked too.
+				// Check the body as well: a 200 must come from the
+				// worker's health endpoint, not from a proxy on the way.
 				if resp.StatusCode == http.StatusOK && strings.Contains(string(body), `"status":"ok"`) {
 					t.Logf("%s routable from head via relay", w.name)
 					return
@@ -300,4 +306,28 @@ func logWorkerPeers(t *testing.T, w rwNode, other string) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	t.Logf("%s connected to %s: %v", w.name, other[:12], strings.Contains(string(body), other))
+}
+
+// randomPeerID returns a valid peer ID that no node in the mesh has.
+func randomPeerID(t *testing.T) string {
+	t.Helper()
+	_, pub, err := crypto.GenerateEd25519Key(nil)
+	require.NoError(t, err)
+	id, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
+	return id.String()
+}
+
+// requireForwardFails asserts that a p2p forward from the head to an
+// unreachable peer reports the failure with a 5xx status.
+func requireForwardFails(t *testing.T, head rwNode, target string) {
+	t.Helper()
+	client := &http.Client{Timeout: 90 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/v1/p2p/%s/v1/health", head.hostPort, target))
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	t.Logf("forward to unreachable peer: HTTP %d %.80s", resp.StatusCode, strings.TrimSpace(string(body)))
+	require.GreaterOrEqual(t, resp.StatusCode, 500, "failed forward must not report success")
+	require.Equal(t, "1", resp.Header.Get("X-Otela-Proxy-Error"))
 }
