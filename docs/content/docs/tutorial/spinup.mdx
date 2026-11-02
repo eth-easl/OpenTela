@@ -88,6 +88,10 @@ In the above command:
 - `--service.port 8080` specifies the port number of the service provided by this node, which is 8080 in this case. This should be the same port number as the one used in the subprocess command.
 - `--seed 1` sets the random seed to 1, so that this worker node will randomly generate a different peer ID from the head node. You can also set it to any other number, or even remove this flag to have a random seed, as long as the peer ID of this worker node is different from the head node.
 
+<Callout type="info">
+The peer ID comes from a key file under `~/.config/opentela/keys/` (or `--config-dir`), and the peer database lives under `~/.ocfcore/`. When several nodes share one home directory, e.g. the nodes of a multi-node Slurm job on a shared filesystem, they would all load the same key, even with different `--seed` values (a seed is only used when no key file exists yet). Start such nodes with `--ephemeral-identity` (a fresh, never-persisted peer ID per process) and a node-local `--datadir` (e.g. `--datadir "$(mktemp -d)"`) so each one gets its own identity and database.
+</Callout>
+
 Once you run the above command, OpenTela will start the subprocess to serve the LLM, and connect this worker node to the head node.
 
 ```bash

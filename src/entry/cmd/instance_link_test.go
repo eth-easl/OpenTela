@@ -213,3 +213,83 @@ func TestBootAccountPrefersDeployKeyWithoutAccountCreds(t *testing.T) {
 		t.Fatalf("bootAccount should have used the deploy-key path, calls: %v", calls)
 	}
 }
+
+func TestNodeLinkSignerUsesEphemeralIdentity(t *testing.T) {
+	// With --ephemeral-identity the node serves with the in-memory key, so the
+	// account link must name that peer and must not write a key file.
+	resetLinkConfig(t)
+	viper.Set(protocol.EphemeralIdentityKey, true)
+	t.Cleanup(func() { viper.Set(protocol.EphemeralIdentityKey, false) })
+
+	peerID, _, err := nodeLinkSigner()
+	if err != nil {
+		t.Fatalf("nodeLinkSigner: %v", err)
+	}
+	served, err := protocol.EphemeralKey()
+	if err != nil {
+		t.Fatalf("EphemeralKey: %v", err)
+	}
+	want, err := peerIDFromPriv(served)
+	if err != nil {
+		t.Fatalf("peerIDFromPriv: %v", err)
+	}
+	if peerID != want {
+		t.Fatalf("linked peer %s, but the node serves as %s", peerID, want)
+	}
+	keyPath, err := protocol.ResolveKeyPath()
+	if err != nil {
+		t.Fatalf("ResolveKeyPath: %v", err)
+	}
+	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
+		t.Fatalf("a key file was written at %s (stat err %v)", keyPath, err)
+	}
+}
+
+func TestNodeLinkSignerRefusesSeededIdentity(t *testing.T) {
+	// A seed-derived key is guessable; it must never be linked to an account,
+	// and the refusal must not mint a key file as a side effect.
+	resetLinkConfig(t)
+	viper.Set("seed", "7")
+	t.Cleanup(func() { viper.Set("seed", "") })
+
+	if _, _, err := nodeLinkSigner(); err == nil {
+		t.Fatal("expected nodeLinkSigner to refuse a seeded identity")
+	}
+	keyPath, err := protocol.ResolveKeyPath()
+	if err != nil {
+		t.Fatalf("ResolveKeyPath: %v", err)
+	}
+	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
+		t.Fatalf("a key file was written at %s (stat err %v)", keyPath, err)
+	}
+}
+
+func TestRunInstanceLinkRefusesEphemeralIdentity(t *testing.T) {
+	// OF_EPHEMERAL_IDENTITY reaches every command; a standalone link would
+	// spend a key use on an identity that dies with this process.
+	resetLinkConfig(t)
+	var calls []string
+	srv := linkStubServer(t, http.StatusOK, `{"id":9,"peer_id":"p"}`, &calls)
+	defer srv.Close()
+	viper.Set("account.api_url", srv.URL)
+	viper.Set("instance.deploy_key", "otd-test")
+	viper.Set(protocol.EphemeralIdentityKey, true)
+	t.Cleanup(func() { viper.Set(protocol.EphemeralIdentityKey, false) })
+
+	if err := runInstanceLink(&cobra.Command{}); err == nil {
+		t.Fatal("expected runInstanceLink to refuse an ephemeral identity")
+	}
+	if len(calls) != 0 {
+		t.Fatalf("no control-plane call expected, got %v", calls)
+	}
+}
+
+func TestNodeLinkSignerRejectsBadSeed(t *testing.T) {
+	resetLinkConfig(t)
+	viper.Set("seed", "not-a-number")
+	t.Cleanup(func() { viper.Set("seed", "") })
+
+	if _, _, err := nodeLinkSigner(); err == nil {
+		t.Fatal("expected an error for a non-integer seed")
+	}
+}

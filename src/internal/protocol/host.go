@@ -66,11 +66,9 @@ func GetP2PNode(ds datastore.Batching) (host.Host, dualdht.DHT) {
 	hostOnce.Do(func() {
 		ctx := context.Background()
 		var err error
-		seed := viper.GetString("seed")
-		// try to parse the seed as int64
-		seedInt, err := strconv.ParseInt(seed, 10, 64)
+		seedInt, err := ConfiguredSeed()
 		if err != nil {
-			common.Logger.Error("Seed is not a valid int64 value: ", seed, " parse error: ", err)
+			common.Logger.Error(err)
 			os.Exit(1)
 		}
 		host, err := newHost(ctx, seedInt, ds)
@@ -91,13 +89,38 @@ func registerPingProtocol(h host.Host) {
 	ping.NewPingService(h)
 }
 
-func newHost(ctx context.Context, seed int64, ds datastore.Batching) (host.Host, error) {
-	var err error
-	if err != nil {
-		common.Logger.Error("Error while creating connection manager: ", err)
+// ConfiguredSeed parses the configured identity seed (--seed / cfg.yaml);
+// unset means 0, the random-key default.
+func ConfiguredSeed() (int64, error) {
+	seed := viper.GetString("seed")
+	if seed == "" {
+		return 0, nil
 	}
+	seedInt, err := strconv.ParseInt(seed, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("seed %q is not a valid int64 value: %w", seed, err)
+	}
+	return seedInt, nil
+}
+
+// NodeIdentity picks the libp2p identity for this node: the process's
+// in-memory EphemeralKey with --ephemeral-identity, otherwise the persisted
+// key file (created from seed, or randomly when seed is 0, on first run).
+// It is the single source of truth for both serving (newHost) and the
+// account link (`otela instance link`), which must present the same PeerID.
+func NodeIdentity(seed int64) (crypto.PrivKey, error) {
 	var priv crypto.PrivKey
-	if seed == 0 {
+	var err error
+	if viper.GetBool(EphemeralIdentityKey) {
+		// A fresh identity for this process only: no key file is read or
+		// written, so nodes sharing a $HOME still get distinct peer IDs.
+		// Takes precedence over --seed.
+		priv, err = EphemeralKey()
+		if err != nil {
+			return nil, err
+		}
+		common.Logger.Info("ephemeral-identity: using a fresh in-memory identity (not persisted)")
+	} else if seed == 0 {
 		// seed=0 (default): load existing key from disk for stable identity.
 		// If no key file exists yet, generate a random one and persist it.
 		priv = LoadKeyFromFile()
@@ -116,14 +139,18 @@ func newHost(ctx context.Context, seed int64, ds datastore.Batching) (host.Host,
 		priv = LoadKeyFromFile()
 		if priv == nil {
 			common.Logger.Debugf("No existing key file, generating from seed=%d", seed)
-			r := mrand.New(mrand.NewSource(seed))
-			priv, _, err = crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, r)
+			priv, err = newKey(mrand.New(mrand.NewSource(seed)))
 			if err != nil {
 				return nil, err
 			}
 			WriteKeyToFile(priv)
 		}
 	}
+	return priv, err
+}
+
+func newHost(ctx context.Context, seed int64, ds datastore.Batching) (host.Host, error) {
+	priv, err := NodeIdentity(seed)
 	if err != nil {
 		return nil, err
 	}

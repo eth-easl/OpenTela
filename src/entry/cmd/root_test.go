@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"opentela/internal/protocol"
 )
 
 func TestRootCommand(t *testing.T) {
@@ -360,4 +363,63 @@ func TestInitConfigRetiredBillingGuard(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "billing.enabled is set", "guard error should name the switch")
 	assert.Contains(t, err.Error(), "API market", "guard error should point at the single billing rail")
+}
+
+func TestStartFlagsForSharedHomeAreNotPersisted(t *testing.T) {
+	// The first run seeds cfg.yaml from viper's settings. A one-off
+	// --ephemeral-identity or a temporary --datadir must not end up in it,
+	// or every later `otela start` would silently inherit them.
+	//
+	// Runs in a fresh test process: other tests call viper.Reset, which drops
+	// the flag bindings made in init() — exactly what this test must see.
+	if os.Getenv("OTELA_TEST_PERSIST_CHILD") == "1" {
+		startFlagsNotPersistedChild(t)
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestStartFlagsForSharedHomeAreNotPersisted$", "-test.count=1", "-test.v") // #nosec G204 -- re-runs this test binary
+	cmd.Env = append(os.Environ(), "OTELA_TEST_PERSIST_CHILD=1", "HOME="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "child test failed:\n%s", out)
+	// A child that matched no test also exits 0; make sure it really ran.
+	require.Contains(t, string(out), "--- PASS: TestStartFlagsForSharedHomeAreNotPersisted", "child did not run the test:\n%s", out)
+}
+
+func startFlagsNotPersistedChild(t *testing.T) {
+	tempDir := t.TempDir()
+	viper.Set("config_dir", tempDir)
+	cfgFile = ""
+	dataDir := filepath.Join(tempDir, "node-data")
+	require.NoError(t, startCmd.Flags().Set(protocol.EphemeralIdentityKey, "true"))
+	require.NoError(t, startCmd.Flags().Set("datadir", dataDir))
+
+	require.NoError(t, initConfig(startCmd))
+
+	// This run sees both flags...
+	assert.True(t, viper.GetBool(protocol.EphemeralIdentityKey))
+	assert.Equal(t, dataDir, viper.GetString("datadir"))
+	// ...but the seeded cfg.yaml does not carry them.
+	written, err := os.ReadFile(filepath.Join(tempDir, "cfg.yaml"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(written), "ephemeral")
+	assert.NotContains(t, string(written), dataDir)
+}
+
+func TestEphemeralIdentityFromEnv(t *testing.T) {
+	// SLURM scripts configure nodes through OF_*; the hyphenated flag name is
+	// out of AutomaticEnv's reach, so the env form is bound explicitly. It
+	// must apply to this run without being seeded into cfg.yaml.
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	tempDir := t.TempDir()
+	viper.Set("config_dir", tempDir)
+	cfgFile = ""
+	t.Cleanup(func() { cfgFile = "" })
+	t.Setenv(protocol.EphemeralIdentityEnv, "true")
+
+	require.NoError(t, initConfig(startCmd))
+
+	assert.True(t, viper.GetBool(protocol.EphemeralIdentityKey))
+	written, err := os.ReadFile(filepath.Join(tempDir, "cfg.yaml"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(written), "ephemeral")
 }

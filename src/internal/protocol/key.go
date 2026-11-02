@@ -2,9 +2,11 @@ package protocol
 
 import (
 	"crypto/rand"
+	"io"
 	"opentela/internal/common"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/spf13/viper"
@@ -84,10 +86,50 @@ func LoadKeyFromFile() crypto.PrivKey {
 // seed=0 and no key exists, exposed so that `otela init` can pre-generate
 // the key without starting a libp2p host.
 func GenerateAndWriteKey() (crypto.PrivKey, error) {
-	priv, _, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, rand.Reader)
+	priv, err := newKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 	WriteKeyToFile(priv)
 	return priv, nil
+}
+
+// newKey generates an RSA-2048 libp2p identity from r. Persisted, seeded and
+// ephemeral identities all go through it so their key type cannot drift.
+func newKey(r io.Reader) (crypto.PrivKey, error) {
+	priv, _, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, r)
+	return priv, err
+}
+
+// EphemeralIdentityKey is the viper key (and `otela start` flag) that makes a
+// node use EphemeralKey instead of the persisted key file. The hyphen keeps
+// OF_EPHEMERAL-IDENTITY out of reach of AutomaticEnv, so the env form is
+// bound explicitly as EphemeralIdentityEnv.
+const EphemeralIdentityKey = "ephemeral-identity"
+
+// EphemeralIdentityEnv is the environment variable that enables
+// EphemeralIdentityKey, e.g. for SLURM scripts that configure nodes via OF_*.
+const EphemeralIdentityEnv = "OF_EPHEMERAL_IDENTITY"
+
+var (
+	ephemeralKeyMu sync.Mutex
+	ephemeralKey   crypto.PrivKey
+)
+
+// EphemeralKey returns this process's in-memory RSA-2048 libp2p identity,
+// generating it on first use; nothing is read from or written to disk. Nodes
+// that share one $HOME (e.g. the nodes of a multi-node Slurm job) would
+// otherwise all load the same persisted key and announce the same peer ID.
+// Every caller in the process (libp2p host, instance link) gets the same key.
+func EphemeralKey() (crypto.PrivKey, error) {
+	ephemeralKeyMu.Lock()
+	defer ephemeralKeyMu.Unlock()
+	if ephemeralKey == nil {
+		priv, err := newKey(rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		ephemeralKey = priv
+	}
+	return ephemeralKey, nil
 }
