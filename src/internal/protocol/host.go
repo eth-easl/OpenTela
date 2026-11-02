@@ -328,6 +328,10 @@ func newHost(ctx context.Context, seed int64, ds datastore.Batching) (host.Host,
 		},
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			common.Logger.Debugf("Disconnected from peer: %s  conns=%d", c.RemotePeer(), len(n.Conns()))
+			// A relay v2 reservation dies with the connection it was made on.
+			if n.Connectedness(c.RemotePeer()) != network.Connected {
+				forgetRelayReservation(c.RemotePeer())
+			}
 			// Mark peer as disconnected — only update existing peers.
 			go func(pid peer.ID) {
 				if pid == host.ID() {
@@ -364,6 +368,9 @@ func StartAutoReconnect(ctx context.Context) {
 	autoReconnectOnce.Do(func() {
 		host, _ := GetP2PNode(nil)
 		go startAutoReconnect(ctx, host)
+		if connectivityWatchdogEnabled() {
+			go startConnectivityWatchdog(ctx, host)
+		}
 	})
 }
 
@@ -422,25 +429,17 @@ func startAutoReconnect(ctx context.Context, h host.Host) {
 }
 
 func tryReconnectToBootstraps(ctx context.Context, h host.Host, dialTimeout time.Duration) bool {
-	mode := viper.GetString("mode")
-	addrs := getDefaultBootstrapPeers(nil, mode)
-	if len(addrs) == 0 {
+	// Re-resolve discovery sources on every reconnect attempt; the cache
+	// keeps the last known set if resolution fails.
+	bootstraps.refresh(h.ID())
+	peerInfos := bootstraps.list()
+	if len(peerInfos) == 0 {
 		common.Logger.Debug("Reconnect attempt skipped: no bootstrap addresses configured")
-		return false
-	}
-
-	peerInfos, err := peer.AddrInfosFromP2pAddrs(addrs...)
-	if err != nil {
-		common.Logger.Debug("Failed to parse bootstrap peers during reconnect: ", err)
 		return false
 	}
 
 	successes := 0
 	for _, info := range peerInfos {
-		if info.ID == h.ID() {
-			continue
-		}
-
 		if h.Network().Connectedness(info.ID) == network.Connected {
 			successes++
 			continue
@@ -750,10 +749,15 @@ func ConnectedBootstraps() []string {
 	return bootstraps
 }
 
-// MakeRelayReservations reserves a slot on every connected peer's relay
-// service. This is required for relay v2: without a reservation, other peers
-// cannot connect to us through the relay (they get NO_RESERVATION).
-// Only runs for workers (nodes without public-addr).
+// MakeRelayReservations reserves a slot on the relay service of connected
+// relay-capable peers. This is required for relay v2: without a reservation,
+// other peers cannot connect to us through the relay (they get
+// NO_RESERVATION). Only runs for workers (nodes without public-addr).
+//
+// Candidates are bootstrap peers plus peers the node table marks as relay or
+// head or that have a public address; see relayCandidates. Reservations run in
+// parallel (bounded), so one round takes about one Reserve timeout rather than
+// one timeout per peer.
 func MakeRelayReservations() {
 	if viper.GetString("public-addr") != "" {
 		return // head/relay nodes don't need relay reservations
@@ -763,24 +767,14 @@ func MakeRelayReservations() {
 		common.Logger.Debug("MakeRelayReservations: host not ready, skipping")
 		return
 	}
-	var reservedRelay string
-	for _, p := range h.Network().Peers() {
-		if p == h.ID() {
-			continue
-		}
-		ai := peer.AddrInfo{ID: p, Addrs: h.Peerstore().Addrs(p)}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_, err := relayClient.Reserve(ctx, h, ai)
-		cancel()
-		if err != nil {
-			common.Logger.Debugf("Relay reservation on %s failed: %v", p.String()[:12], err)
-		} else {
-			common.Logger.Infof("Relay reservation on %s succeeded", p.String()[:12])
-			if reservedRelay == "" {
-				reservedRelay = p.String()
-			}
-		}
+	if !relayReservationsRunning.CompareAndSwap(false, true) {
+		common.Logger.Debug("MakeRelayReservations: already running, skipping")
+		return
 	}
+	defer relayReservationsRunning.Store(false)
+
+	reserved := reserveOnRelays(h, relayCandidates(h, isRelayCapablePeer), relayReserveFunc)
+	reservedRelay := pickAdvertisedRelay(h, reserved)
 	// Store the relay peer ID in our own CRDT entry so head nodes
 	// know which relay to route through to reach us.
 	if reservedRelay != "" && GetSelf().RelayPeer != reservedRelay {
@@ -788,6 +782,116 @@ func MakeRelayReservations() {
 		ReannounceLocalServices()
 		common.Logger.Infof("Registered relay peer %s in CRDT", reservedRelay[:12])
 	}
+}
+
+const (
+	relayReserveParallelism = 8
+	relayReserveTimeout     = 10 * time.Second
+)
+
+// relayReserveFunc makes one relay v2 reservation. A variable so tests can
+// substitute it.
+var relayReserveFunc = func(ctx context.Context, h host.Host, p peer.ID) (time.Time, error) {
+	rsvp, err := relayClient.Reserve(ctx, h, peer.AddrInfo{ID: p, Addrs: h.Peerstore().Addrs(p)})
+	if err != nil {
+		return time.Time{}, err
+	}
+	return rsvp.Expiration, nil
+}
+
+// isRelayCapablePeer reports whether the node table marks p as a peer heads
+// can route through: a relay or head role, or a public address.
+func isRelayCapablePeer(p peer.ID) bool {
+	info, err := GetPeerFromTable(p.String())
+	if err != nil {
+		return false
+	}
+	if info.PublicAddress != "" {
+		return true
+	}
+	for _, r := range info.Role {
+		if r == "relay" || r == "head" {
+			return true
+		}
+	}
+	return false
+}
+
+// relayCandidates returns the connected peers worth reserving on: bootstrap
+// peers and relay-capable peers. Every node runs a relay service, but a
+// reservation on another NATed worker is of no use to heads, and AutoRelay
+// already keeps reservations on all connected peers for worker-to-worker
+// circuits. Falls back to every connected peer when none qualifies, which
+// preserves the previous behaviour on unusual topologies.
+func relayCandidates(h host.Host, relayCapable func(peer.ID) bool) []peer.ID {
+	var all, out []peer.ID
+	for _, p := range h.Network().Peers() {
+		if p == h.ID() {
+			continue
+		}
+		all = append(all, p)
+		if bootstraps.contains(p) || relayCapable(p) {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return all
+	}
+	return out
+}
+
+// reserveOnRelays reserves on each candidate in parallel with bounded
+// concurrency and returns the peers that accepted, in candidate order.
+func reserveOnRelays(h host.Host, candidates []peer.ID,
+	reserve func(context.Context, host.Host, peer.ID) (time.Time, error)) []peer.ID {
+	ok := make([]bool, len(candidates))
+	sem := make(chan struct{}, relayReserveParallelism)
+	var wg sync.WaitGroup
+	for i, p := range candidates {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, p peer.ID) {
+			defer func() { <-sem; wg.Done() }()
+			ctx, cancel := context.WithTimeout(context.Background(), relayReserveTimeout)
+			defer cancel()
+			expires, err := reserve(ctx, h, p)
+			if err != nil {
+				common.Logger.Debugf("Relay reservation on %s failed: %v", p.String()[:12], err)
+				return
+			}
+			recordRelayReservation(p, expires)
+			common.Logger.Infof("Relay reservation on %s succeeded", p.String()[:12])
+			ok[i] = true
+		}(i, p)
+	}
+	wg.Wait()
+	var reserved []peer.ID
+	for i, p := range candidates {
+		if ok[i] {
+			reserved = append(reserved, p)
+		}
+	}
+	return reserved
+}
+
+// pickAdvertisedRelay chooses the relay to advertise in the CRDT. It keeps the
+// current RelayPeer while it still holds a valid reservation, so the advertised
+// relay does not churn with peer iteration order. Otherwise it prefers a
+// freshly reserved bootstrap peer, then any freshly reserved peer. Returns ""
+// when there is nothing to advertise.
+func pickAdvertisedRelay(h host.Host, reserved []peer.ID) string {
+	if advertisedRelayValid(h) {
+		return GetSelf().RelayPeer
+	}
+	for _, p := range reserved {
+		if bootstraps.contains(p) {
+			return p.String()
+		}
+	}
+	if len(reserved) > 0 {
+		return reserved[0].String()
+	}
+	return ""
 }
 
 // TryHolePunch invokes DCUtR (Direct Connection Upgrade through Relay) for the

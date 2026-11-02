@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -101,11 +102,46 @@ func getTrustedTransport() *http.Transport {
 	return trustedTransport
 }
 
+// proxyErrorHeader marks a response that this node's reverse proxy generated
+// because forwarding failed, as opposed to a response from the upstream
+// service. A head that reaches a worker through a relay hop uses it to tell
+// "the relay could not reach the worker" (retry another worker) from an error
+// the worker's own service returned (pass through).
+const proxyErrorHeader = "X-Otela-Proxy-Error"
+
+// proxyErrorStatus maps a forwarding error to an HTTP status: 504 when the
+// upstream did not answer in time, 502 otherwise.
+func proxyErrorStatus(err error) int {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusGatewayTimeout
+	}
+	return http.StatusBadGateway
+}
+
+// ErrorHandler is the httputil.ReverseProxy error handler for p2p forwards.
+// It reports the failure with a 5xx status. It used to write the error with
+// an implicit 200, so callers and health checks took failed forwards for
+// success. The body keeps the "ERROR: <reason>" text for compatibility.
 func ErrorHandler(res http.ResponseWriter, req *http.Request, err error) {
+	common.Logger.Debugf("Proxy forward to %s failed: %v", req.URL.Host, err)
+	h := res.Header()
+	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set(proxyErrorHeader, "1")
+	res.WriteHeader(proxyErrorStatus(err))
 	if _, werr := fmt.Fprintf(res, "ERROR: %s", err.Error()); werr != nil {
 		// The client is usually already gone when this write fails.
 		common.Logger.Debug("Error writing error response: ", werr)
 	}
+}
+
+// relayHopError reports whether r is a relay's proxy error rather than a
+// response from the target worker. Only meaningful when the request went
+// through a relay hop.
+func relayHopError(r *http.Response) error {
+	if r.Header.Get(proxyErrorHeader) == "" {
+		return nil
+	}
+	return fmt.Errorf("relay hop failed with HTTP %d", r.StatusCode)
 }
 
 // StreamAwareResponseWriter wraps the response writer to handle streaming
@@ -928,6 +964,7 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 
 		// Resolve target URL (direct or via relay)
 		var target url.URL
+		viaRelay := false
 		transport := getGlobalTransport()
 		if scope.trusted() {
 			if !protocol.HasTrustedDirectConnection(targetPeer) {
@@ -952,6 +989,7 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 			relayPath := "/v1/p2p/" + targetPeer + requestPath
 			common.Logger.Debugf("Relay hop: relay=%s path=%s", relayPeer[:12], relayPath)
 			target = url.URL{Scheme: "libp2p", Host: relayPeer, Path: relayPath}
+			viaRelay = true
 		}
 
 		// Wrap c.Writer with a first-byte marker so we can measure the head's
@@ -984,13 +1022,18 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 				rrw.markFailed()
 				return
 			}
-			if _, werr := fmt.Fprintf(res, "ERROR: %s", err.Error()); werr != nil {
-				common.Logger.Debug("Error writing error response: ", werr)
-			}
+			ErrorHandler(res, req, err)
 		}
 
 		capturedPeer := targetPeer
 		proxy.ModifyResponse = func(r *http.Response) error {
+			// The relay could not reach the worker: treat it as a transport
+			// failure so the retry loop tries another worker.
+			if viaRelay {
+				if err := relayHopError(r); err != nil {
+					return err
+				}
+			}
 			st.Mark("head_p2p_to_worker_first_byte")
 			mergeWorkerTiming(st, r)
 			if hv := st.Header(); hv != "" {
