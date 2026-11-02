@@ -249,7 +249,9 @@ func waitRoutable(t *testing.T, head rwNode, relayID string, w rwNode, wID strin
 			if err == nil {
 				body, _ := io.ReadAll(resp.Body)
 				_ = resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
+				// The p2p forward error handler writes "ERROR: ..." with
+				// status 200, so the body must be checked too.
+				if resp.StatusCode == http.StatusOK && strings.Contains(string(body), `"status":"ok"`) {
 					t.Logf("%s routable from head via relay", w.name)
 					return
 				}
