@@ -25,18 +25,19 @@ var startCmd = &cobra.Command{
 			}
 		}
 
-		// Reconcile with the operator's cloud account before anything starts:
-		// ensure a live session, verify wallet linkage, surface billing state.
-		// Best-effort; see bootAccount.
-		bootAccount(cmd)
-
 		component := viper.GetString("component")
 
 		if component == "ingress" {
-			// Start only the ingestion service
+			// Start only the ingestion service. It never brings up a libp2p
+			// host, so there is no peer to reconcile or link: skip bootAccount.
 			ingest.Run()
 			return
 		}
+
+		// Reconcile with the operator's cloud account before the node starts
+		// serving: ensure a live session, verify wallet linkage, surface
+		// billing state. Best-effort; see bootAccount.
+		bootAccount(cmd)
 
 		// check if cleanslate is set
 		if viper.GetBool("cleanslate") {
