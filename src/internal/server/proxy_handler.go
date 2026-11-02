@@ -204,23 +204,20 @@ func P2PForwardHandler(c *gin.Context) {
 	}
 	common.Logger.Debugf("P2P forward: %s", target.String())
 
-	director := func(req *http.Request) {
-		req.URL.Scheme = target.Scheme
-		req.URL.Path = target.Path
-		// req.URL.Host is what the libp2p RoundTripper dials, so it must be the
-		// target peer. Assigning req.Host here instead uses the *incoming* Host
-		// header, because req.Host is only set to target.Host on the next line.
-		// (ServiceForwardHandler gets this right by assigning req.Host first.)
-		req.URL.Host = target.Host
-		req.Host = target.Host
-		if clientWallet != "" {
-			req.Header.Set("X-Otela-Client-Wallet", clientWallet)
-		}
-		// DO NOT read body here; httputil.ReverseProxy will stream it from c.Request.Body
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL.Scheme = target.Scheme
+			pr.Out.URL.Path = target.Path
+			// pr.Out.URL.Host is what the libp2p RoundTripper dials, so it must be
+			// the target peer. pr.Out.Host sets the forwarded Host header.
+			pr.Out.URL.Host = target.Host
+			pr.Out.Host = target.Host
+			if clientWallet != "" {
+				pr.Out.Header.Set("X-Otela-Client-Wallet", clientWallet)
+			}
+			// DO NOT read body here; httputil.ReverseProxy will stream it from c.Request.Body
+		},
 	}
-
-	proxy := httputil.NewSingleHostReverseProxy(&target)
-	proxy.Director = director
 	proxy.Transport = getGlobalTransport()
 	proxy.ErrorHandler = ErrorHandler
 	proxy.ModifyResponse = rewriteHeader()
@@ -295,26 +292,23 @@ func p2pServiceForwardWithScope(c *gin.Context, scope routingScope) {
 	IngestEvents(event)
 	common.Logger.Debugf("P2P service forward: %s", target.String())
 
-	director := func(req *http.Request) {
-		req.URL.Scheme = target.Scheme
-		req.URL.Path = target.Path
-		// req.URL.Host is what the libp2p RoundTripper dials, so it must be the
-		// target peer. Assigning req.Host here instead uses the *incoming* Host
-		// header, because req.Host is only set to target.Host on the next line.
-		// (ServiceForwardHandler gets this right by assigning req.Host first.)
-		req.URL.Host = target.Host
-		req.Host = target.Host
-		if clientWallet != "" {
-			req.Header.Set("X-Otela-Client-Wallet", clientWallet)
-		}
-		if forwardKeyHash != "" {
-			req.Header.Set("X-Otela-Key-Hash", forwardKeyHash)
-			req.Header.Del("Authorization")
-		}
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL.Scheme = target.Scheme
+			pr.Out.URL.Path = target.Path
+			// pr.Out.URL.Host is what the libp2p RoundTripper dials, so it must be
+			// the target peer. pr.Out.Host sets the forwarded Host header.
+			pr.Out.URL.Host = target.Host
+			pr.Out.Host = target.Host
+			if clientWallet != "" {
+				pr.Out.Header.Set("X-Otela-Client-Wallet", clientWallet)
+			}
+			if forwardKeyHash != "" {
+				pr.Out.Header.Set("X-Otela-Key-Hash", forwardKeyHash)
+				pr.Out.Header.Del("Authorization")
+			}
+		},
 	}
-
-	proxy := httputil.NewSingleHostReverseProxy(&target)
-	proxy.Director = director
 	proxy.Transport = transport
 	proxy.ErrorHandler = ErrorHandler
 	proxy.ModifyResponse = rewriteHeader()
@@ -348,23 +342,22 @@ func ServiceForwardHandler(c *gin.Context) {
 		Host:   service.Host + ":" + service.Port,
 		Path:   requestPath,
 	}
-	director := func(req *http.Request) {
-		req.Host = target.Host
-		req.URL.Host = req.Host
-		req.URL.Scheme = target.Scheme
-		req.URL.Path = target.Path
-		// The worker has already authorized the request against the control
-		// plane (using X-Otela-Key-Hash when forwarded by a trusted head).
-		// Drop the client's raw Authorization so it never reaches the local
-		// backend (e.g. SGLang), which has no use for it and should not be
-		// able to observe or log API keys.
-		req.Header.Del("Authorization")
-		req.Header.Del("X-Otela-Key-Hash")
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL.Scheme = target.Scheme
+			pr.Out.URL.Path = target.Path
+			pr.Out.URL.Host = target.Host
+			pr.Out.Host = target.Host
+			// The worker has already authorized the request against the control
+			// plane (using X-Otela-Key-Hash when forwarded by a trusted head).
+			// Drop the client's raw Authorization so it never reaches the local
+			// backend (e.g. SGLang), which has no use for it and should not be
+			// able to observe or log API keys.
+			pr.Out.Header.Del("Authorization")
+			pr.Out.Header.Del("X-Otela-Key-Hash")
+		},
 	}
 	st.Mark("local_proxy")
-
-	proxy := httputil.NewSingleHostReverseProxy(&target)
-	proxy.Director = director
 	// Use global transport here too if we want pooling to external HTTP services,
 	// though standard http.DefaultTransport also pools.
 	// However, if we want shared settings (timeouts), we can use ours.
@@ -999,22 +992,21 @@ func globalServiceForwardWithScope(c *gin.Context, scope routingScope) {
 		fbw := newFirstByteMarker(c.Writer, st, "head_first_byte_sent")
 		rw := newRetryableResponseWriter(fbw, isStreaming, maxBuffer)
 
-		director := func(req *http.Request) {
-			req.URL.Scheme = target.Scheme
-			req.URL.Path = target.Path
-			req.URL.Host = target.Host
-			req.Host = target.Host
-			if clientWallet != "" {
-				req.Header.Set("X-Otela-Client-Wallet", clientWallet)
-			}
-			if forwardKeyHash != "" {
-				req.Header.Set("X-Otela-Key-Hash", forwardKeyHash)
-				req.Header.Del("Authorization")
-			}
+		proxy := &httputil.ReverseProxy{
+			Rewrite: func(pr *httputil.ProxyRequest) {
+				pr.Out.URL.Scheme = target.Scheme
+				pr.Out.URL.Path = target.Path
+				pr.Out.URL.Host = target.Host
+				pr.Out.Host = target.Host
+				if clientWallet != "" {
+					pr.Out.Header.Set("X-Otela-Client-Wallet", clientWallet)
+				}
+				if forwardKeyHash != "" {
+					pr.Out.Header.Set("X-Otela-Key-Hash", forwardKeyHash)
+					pr.Out.Header.Del("Authorization")
+				}
+			},
 		}
-
-		proxy := httputil.NewSingleHostReverseProxy(&target)
-		proxy.Director = director
 		proxy.Transport = transport
 		proxy.ErrorHandler = func(res http.ResponseWriter, req *http.Request, err error) {
 			if rrw, ok := res.(*retryableResponseWriter); ok {

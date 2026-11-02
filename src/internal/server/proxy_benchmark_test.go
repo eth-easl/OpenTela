@@ -46,14 +46,15 @@ func oldProxyHandler(c *gin.Context, target *url.URL) {
 		DisableKeepAlives: true,
 	}
 	// Simplified proxy logic just for benchmark comparison
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Transport = tr
-	// Director that uses the buffered body
-	proxy.Director = func(req *http.Request) {
-		req.URL.Scheme = target.Scheme
-		req.URL.Host = target.Host
-		req.URL.Path = target.Path
-		req.Body = io.NopCloser(bytes.NewBuffer(body))
+	proxy := &httputil.ReverseProxy{
+		Transport: tr,
+		// Uses the buffered body
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL.Scheme = target.Scheme
+			pr.Out.URL.Host = target.Host
+			pr.Out.URL.Path = target.Path
+			pr.Out.Body = io.NopCloser(bytes.NewBuffer(body))
+		},
 	}
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
@@ -61,13 +62,14 @@ func oldProxyHandler(c *gin.Context, target *url.URL) {
 // New implementation (simulated)
 func newProxyHandler(c *gin.Context, target *url.URL) {
 	// Simplified proxy logic
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	// Uses DefaultTransport (pooled)
-	proxy.Director = func(req *http.Request) {
-		req.URL.Scheme = target.Scheme
-		req.URL.Host = target.Host
-		req.URL.Path = target.Path
-		// Direct streaming - no body read
+	proxy := &httputil.ReverseProxy{
+		// Uses DefaultTransport (pooled)
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL.Scheme = target.Scheme
+			pr.Out.URL.Host = target.Host
+			pr.Out.URL.Path = target.Path
+			// Direct streaming - no body read
+		},
 	}
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
