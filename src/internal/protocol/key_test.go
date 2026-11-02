@@ -81,7 +81,7 @@ func TestLoadOrCreateIdentity_EphemeralIgnoresKeyFile(t *testing.T) {
 	// persisted key, and must not overwrite it either.
 	dir := useEphemeralIdentity(t)
 	viper.Set(EphemeralIdentityKey, false)
-	persisted, err := GenerateAndWriteKey()
+	persisted, err := GenerateAndWriteKey(0)
 	require.NoError(t, err)
 	keyPath := filepath.Join(dir, "keys", "id")
 	before, err := os.ReadFile(keyPath)

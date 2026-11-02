@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strconv"
 
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
@@ -18,7 +19,7 @@ import (
 // `otela init` invocations) preserves the existing identity. This lets
 // tooling that needs the PeerID — such as the mesh-bench runner — read
 // it after `otela init` without ever starting the server.
-func ensureLibp2pKey() error {
+func ensureLibp2pKey(seed int64) error {
 	keyPath, err := protocol.ResolveKeyPath()
 	if err != nil {
 		return err
@@ -26,7 +27,7 @@ func ensureLibp2pKey() error {
 	if _, err := os.Stat(keyPath); err == nil {
 		return nil
 	}
-	_, err = protocol.GenerateAndWriteKey()
+	_, err = protocol.GenerateAndWriteKey(seed)
 	return err
 }
 
@@ -40,6 +41,10 @@ var initCmd = &cobra.Command{
   2. Writing a default cfg.yaml with sensible defaults.
   3. Generating a new Solana-compatible Ed25519 keypair and storing it
      under ~/.config/opentela/accounts/<pubkey>/keypair.json.
+  4. Generating the node's libp2p identity key under
+     ~/.config/opentela/keys/id (or <config-dir>/keys/id with --config-dir).
+     Pass --seed <n> for a reproducible, distinct PeerID; 0 (the default)
+     generates a random identity.
 
 The generated keypair can be imported into third-party wallets such as
 Phantom, Solflare, or MetaMask (via Solana Snap). Run:
@@ -54,6 +59,17 @@ without overwriting anything.`,
 		home, err := homedir.Dir()
 		if err != nil {
 			fmt.Printf("Failed to determine home directory: %v\n", err)
+			os.Exit(1)
+		}
+
+		seedStr, err := cmd.Flags().GetString("seed")
+		if err != nil {
+			fmt.Printf("Failed to read seed flag: %v\n", err)
+			os.Exit(1)
+		}
+		seed, err := strconv.ParseInt(seedStr, 10, 64)
+		if err != nil {
+			fmt.Printf("Seed is not a valid int64 value: %s (parse error: %v)\n", seedStr, err)
 			os.Exit(1)
 		}
 
@@ -93,7 +109,7 @@ without overwriting anything.`,
 			fmt.Printf("  Keypair file: %s\n", acc.FilePath)
 			fmt.Println()
 			fmt.Println("No changes were made to the existing wallet.")
-			if err := ensureLibp2pKey(); err != nil {
+			if err := ensureLibp2pKey(seed); err != nil {
 				fmt.Printf("Failed to initialize libp2p key: %v\n", err)
 				os.Exit(1)
 			}
@@ -106,7 +122,7 @@ without overwriting anything.`,
 			os.Exit(1)
 		}
 
-		if err := ensureLibp2pKey(); err != nil {
+		if err := ensureLibp2pKey(seed); err != nil {
 			fmt.Printf("Failed to initialize libp2p key: %v\n", err)
 			os.Exit(1)
 		}

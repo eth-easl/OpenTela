@@ -16,12 +16,14 @@ var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start listening for incoming connections",
 	Run: func(cmd *cobra.Command, args []string) {
-		// A --deploy-key passed at start is authoritative for this run AND
-		// sticky: set the viper override so bootAccount uses it, and persist
-		// it so later boots re-confirm the link without the flag. Best-effort.
+		// A --deploy-key passed at start is authoritative for this run and
+		// links it: set the viper overrides so bootAccount uses it, and
+		// persist the key so later boots can link with --auto-link (or
+		// `otela instance link`) without the flag. Best-effort.
 		if cmd.Flags().Changed("deploy-key") {
 			key, _ := cmd.Flags().GetString("deploy-key")
 			viper.Set("instance.deploy_key", key)
+			viper.Set("instance.auto_link", true)
 			if err := protocol.StoreDeployKey(key); err != nil {
 				common.Logger.Warnf("Could not save the deploy key for auto-use on future boots (%v)", err)
 			}
@@ -87,4 +89,7 @@ func init() {
 	// the "instance.deploy_key" viper binding, and a second binder here would
 	// shadow it (last init wins). Run() reads this flag directly instead.
 	startCmd.Flags().String("deploy-key", "", "deploy key for instance linking (OF_INSTANCE_DEPLOY_KEY); saved for future boots")
+
+	startCmd.Flags().Bool("auto-link", false, "link this node to your account at boot with the stored deploy key (OF_INSTANCE_AUTO_LINK); each new peer ID spends a key use")
+	_ = viper.BindPFlag("instance.auto_link", startCmd.Flags().Lookup("auto-link"))
 }

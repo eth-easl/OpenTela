@@ -126,7 +126,7 @@ func NodeIdentity(seed int64) (crypto.PrivKey, error) {
 		priv = LoadKeyFromFile()
 		if priv == nil {
 			common.Logger.Debug("seed=0: no existing key file, generating and persisting new identity")
-			priv, err = GenerateAndWriteKey()
+			priv, err = GenerateAndWriteKey(0)
 			if err != nil {
 				return nil, err
 			}
@@ -139,7 +139,7 @@ func NodeIdentity(seed int64) (crypto.PrivKey, error) {
 		priv = LoadKeyFromFile()
 		if priv == nil {
 			common.Logger.Debugf("No existing key file, generating from seed=%d", seed)
-			priv, err = newKey(mrand.New(mrand.NewSource(seed)))
+			priv, err = GenerateKeyFromSeed(seed)
 			if err != nil {
 				return nil, err
 			}
