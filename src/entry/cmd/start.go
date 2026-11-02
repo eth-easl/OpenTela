@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+
 	"opentela/internal/common"
 	"opentela/internal/ingest"
 	"opentela/internal/protocol"
@@ -34,6 +36,8 @@ var startCmd = &cobra.Command{
 			return
 		}
 
+		useEphemeralDatadir()
+
 		// Reconcile with the operator's cloud account before the node starts
 		// serving: ensure a live session, verify wallet linkage, surface
 		// billing state. Best-effort; see bootAccount.
@@ -53,6 +57,24 @@ var startCmd = &cobra.Command{
 
 		server.StartServer()
 	}}
+
+// useEphemeralDatadir points datadir at a per-process temp dir when
+// --ephemeral-identity runs without an explicit --datadir. A new peer ID per
+// run means a new peer database per run; left in the shared ~/.ocfcore they
+// pile up (killed nodes never remove theirs) and fill the home quota. Called
+// after initConfig seeded cfg.yaml, so the override never persists.
+func useEphemeralDatadir() {
+	if !viper.GetBool(protocol.EphemeralIdentityKey) || common.DataDir() != "" {
+		return
+	}
+	dir, err := os.MkdirTemp("", "otela-")
+	if err != nil {
+		common.Logger.Warnf("ephemeral-identity: could not create a temp datadir, falling back to ~/.ocfcore (%v)", err)
+		return
+	}
+	viper.Set("datadir", dir)
+	common.Logger.Infof("ephemeral-identity: no --datadir given, using %s", dir)
+}
 
 func init() {
 	startCmd.Flags().String("component", "server", "Component to start (server, ingress, all)")

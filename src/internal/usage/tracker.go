@@ -11,7 +11,6 @@ import (
 	"opentela/internal/common"
 
 	"github.com/google/uuid"
-	"github.com/spf13/viper"
 )
 
 var (
@@ -28,7 +27,7 @@ type Tracker struct {
 func InitTracker() error {
 	var initErr error
 	trackerOnce.Do(func() {
-		dataDir := viper.GetString("datadir")
+		dataDir := common.DataDir()
 		if dataDir == "" {
 			homeDir, err := os.UserHomeDir()
 			if err != nil {

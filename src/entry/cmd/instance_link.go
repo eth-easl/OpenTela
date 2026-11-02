@@ -52,31 +52,19 @@ automatically — no flags needed. Re-links of the same account are free
 	},
 }
 
-// nodeLinkSigner loads — or, on first use, mints and persists — the node's
-// libp2p identity key, and returns the derived PeerID plus a PeerSigner over
-// that identity. Shared by `otela instance link` and the boot-time link
-// check: linking and serving must present the same identity.
+// nodeLinkSigner resolves the node's libp2p identity through
+// protocol.NodeIdentity — the same resolver the libp2p host uses — and
+// returns the derived PeerID plus a PeerSigner over that identity. Shared by
+// `otela instance link` and the boot-time link check: linking and serving
+// must present the same identity.
 func nodeLinkSigner() (string, account.PeerSigner, error) {
-	var priv crypto.PrivKey
-	if viper.GetBool(protocol.EphemeralIdentityKey) {
-		// `otela start --ephemeral-identity` serves with the in-memory key,
-		// so link that one, and leave no key file behind.
-		var err error
-		priv, err = protocol.EphemeralKey()
-		if err != nil {
-			return "", nil, fmt.Errorf("create ephemeral node identity: %w", err)
-		}
-	} else {
-		priv = protocol.LoadKeyFromFile()
+	seed, err := protocol.ConfiguredSeed()
+	if err != nil {
+		return "", nil, err
 	}
-	if priv == nil {
-		// First run on this machine: mint the same identity the node will
-		// load on start, so linking and serving share one PeerID.
-		var err error
-		priv, err = protocol.GenerateAndWriteKey()
-		if err != nil {
-			return "", nil, fmt.Errorf("create node identity key: %w", err)
-		}
+	priv, err := protocol.NodeIdentity(seed)
+	if err != nil {
+		return "", nil, fmt.Errorf("load node identity: %w", err)
 	}
 	peerID, err := peerIDFromPriv(priv)
 	if err != nil {

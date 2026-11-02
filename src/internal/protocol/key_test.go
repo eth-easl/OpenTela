@@ -89,7 +89,7 @@ func TestLoadOrCreateIdentity_EphemeralIgnoresKeyFile(t *testing.T) {
 
 	viper.Set(EphemeralIdentityKey, true)
 	for _, seed := range []int64{0, 1} {
-		priv, err := loadOrCreateIdentity(seed)
+		priv, err := NodeIdentity(seed)
 		require.NoError(t, err)
 		assert.False(t, priv.Equals(persisted), "seed=%d: ephemeral identity must not reuse the key file", seed)
 	}
@@ -101,7 +101,7 @@ func TestLoadOrCreateIdentity_EphemeralIgnoresKeyFile(t *testing.T) {
 func TestLoadOrCreateIdentity_EphemeralWritesNoKeyFile(t *testing.T) {
 	dir := useEphemeralIdentity(t)
 
-	_, err := loadOrCreateIdentity(0)
+	_, err := NodeIdentity(0)
 	require.NoError(t, err)
 	_, err = os.Stat(filepath.Join(dir, "keys", "id"))
 	assert.True(t, os.IsNotExist(err), "no key file should be written")
@@ -112,14 +112,14 @@ func TestEphemeralKey_OnePerProcess(t *testing.T) {
 	// identity; a new process (simulated by forgetting the key) gets a new one,
 	// even with the same seed and the same config dir.
 	useEphemeralIdentity(t)
-	first, err := loadOrCreateIdentity(1)
+	first, err := NodeIdentity(1)
 	require.NoError(t, err)
 	again, err := EphemeralKey()
 	require.NoError(t, err)
 	assert.True(t, first.Equals(again), "same process: same identity")
 
 	forgetEphemeralKey()
-	next, err := loadOrCreateIdentity(1)
+	next, err := NodeIdentity(1)
 	require.NoError(t, err)
 	assert.False(t, first.Equals(next), "new process: new identity")
 }
@@ -149,9 +149,9 @@ func TestLoadOrCreateIdentity_DefaultReusesKeyFile(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	viper.Set("config_dir", t.TempDir())
 
-	first, err := loadOrCreateIdentity(0)
+	first, err := NodeIdentity(0)
 	require.NoError(t, err)
-	second, err := loadOrCreateIdentity(0)
+	second, err := NodeIdentity(0)
 	require.NoError(t, err)
 	assert.True(t, first.Equals(second), "without --ephemeral-identity the identity stays stable")
 }

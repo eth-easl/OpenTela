@@ -244,3 +244,38 @@ func TestNodeLinkSignerUsesEphemeralIdentity(t *testing.T) {
 		t.Fatalf("a key file was written at %s (stat err %v)", keyPath, err)
 	}
 }
+
+func TestNodeLinkSignerMatchesHostIdentityForSeed(t *testing.T) {
+	// A seeded node must link the identity it will serve with: both paths
+	// go through protocol.NodeIdentity, so the first one to run mints the key
+	// from the seed and the other loads it.
+	resetLinkConfig(t)
+	viper.Set("seed", "7")
+	t.Cleanup(func() { viper.Set("seed", "") })
+
+	peerID, _, err := nodeLinkSigner()
+	if err != nil {
+		t.Fatalf("nodeLinkSigner: %v", err)
+	}
+	served, err := protocol.NodeIdentity(7)
+	if err != nil {
+		t.Fatalf("NodeIdentity: %v", err)
+	}
+	want, err := peerIDFromPriv(served)
+	if err != nil {
+		t.Fatalf("peerIDFromPriv: %v", err)
+	}
+	if peerID != want {
+		t.Fatalf("linked peer %s, but the node serves as %s", peerID, want)
+	}
+}
+
+func TestNodeLinkSignerRejectsBadSeed(t *testing.T) {
+	resetLinkConfig(t)
+	viper.Set("seed", "not-a-number")
+	t.Cleanup(func() { viper.Set("seed", "") })
+
+	if _, _, err := nodeLinkSigner(); err == nil {
+		t.Fatal("expected an error for a non-integer seed")
+	}
+}

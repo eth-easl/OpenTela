@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 )
 
@@ -54,5 +55,25 @@ func TestGetDBPathHonorsDatadir(t *testing.T) {
 	}
 	if st, err := os.Stat(filepath.Join(dir, "ocfcore")); err != nil || !st.IsDir() {
 		t.Fatalf("expected directory to be created: %v, %v", st, err)
+	}
+}
+
+func TestDataDirExpandsTilde(t *testing.T) {
+	// datadir from cfg.yaml or OF_DATADIR reaches us unexpanded; "~/x" must
+	// not become a literal "./~/x" under the working directory.
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	home, err := homedir.Dir()
+	if err != nil {
+		t.Fatalf("homedir: %v", err)
+	}
+
+	viper.Set("datadir", "~/scratch/otela")
+	if got, want := DataDir(), filepath.Join(home, "scratch", "otela"); got != want {
+		t.Fatalf("DataDir() = %q, want %q", got, want)
+	}
+	viper.Set("datadir", "")
+	if got := DataDir(); got != "" {
+		t.Fatalf("unset datadir: DataDir() = %q, want empty", got)
 	}
 }

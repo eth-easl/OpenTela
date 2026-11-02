@@ -403,3 +403,23 @@ func startFlagsNotPersistedChild(t *testing.T) {
 	assert.NotContains(t, string(written), "ephemeral")
 	assert.NotContains(t, string(written), dataDir)
 }
+
+func TestEphemeralIdentityFromEnv(t *testing.T) {
+	// SLURM scripts configure nodes through OF_*; the hyphenated flag name is
+	// out of AutomaticEnv's reach, so the env form is bound explicitly. It
+	// must apply to this run without being seeded into cfg.yaml.
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	tempDir := t.TempDir()
+	viper.Set("config_dir", tempDir)
+	cfgFile = ""
+	t.Cleanup(func() { cfgFile = "" })
+	t.Setenv(protocol.EphemeralIdentityEnv, "true")
+
+	require.NoError(t, initConfig(startCmd))
+
+	assert.True(t, viper.GetBool(protocol.EphemeralIdentityKey))
+	written, err := os.ReadFile(filepath.Join(tempDir, "cfg.yaml"))
+	require.NoError(t, err)
+	assert.NotContains(t, string(written), "ephemeral")
+}

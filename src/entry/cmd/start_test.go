@@ -1,11 +1,15 @@
 package cmd
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+
+	"opentela/internal/protocol"
 )
 
 func TestStartCommand(t *testing.T) {
@@ -277,4 +281,29 @@ func TestStartCommandHelp(t *testing.T) {
 
 	err := testCmd.Execute()
 	assert.NoError(t, err)
+}
+
+func TestUseEphemeralDatadir(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	t.Setenv("TMPDIR", t.TempDir())
+
+	// Persisted identity: datadir stays unset (~/.ocfcore, as before).
+	useEphemeralDatadir()
+	assert.Empty(t, viper.GetString("datadir"))
+
+	// An explicit --datadir always wins.
+	viper.Set(protocol.EphemeralIdentityKey, true)
+	viper.Set("datadir", "/explicit")
+	useEphemeralDatadir()
+	assert.Equal(t, "/explicit", viper.GetString("datadir"))
+
+	// Ephemeral without --datadir: a fresh per-process temp dir, never $HOME.
+	viper.Set("datadir", "")
+	useEphemeralDatadir()
+	dir := viper.GetString("datadir")
+	assert.True(t, strings.HasPrefix(dir, os.Getenv("TMPDIR")), "datadir %q not under TMPDIR", dir)
+	st, err := os.Stat(dir)
+	assert.NoError(t, err)
+	assert.True(t, st.IsDir())
 }

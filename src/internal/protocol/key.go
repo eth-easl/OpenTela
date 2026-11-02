@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"crypto/rand"
+	"io"
 	"opentela/internal/common"
 	"os"
 	"path/filepath"
@@ -85,7 +86,7 @@ func LoadKeyFromFile() crypto.PrivKey {
 // seed=0 and no key exists, exposed so that `otela init` can pre-generate
 // the key without starting a libp2p host.
 func GenerateAndWriteKey() (crypto.PrivKey, error) {
-	priv, _, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, rand.Reader)
+	priv, err := newKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
@@ -93,9 +94,22 @@ func GenerateAndWriteKey() (crypto.PrivKey, error) {
 	return priv, nil
 }
 
+// newKey generates an RSA-2048 libp2p identity from r. Persisted, seeded and
+// ephemeral identities all go through it so their key type cannot drift.
+func newKey(r io.Reader) (crypto.PrivKey, error) {
+	priv, _, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, r)
+	return priv, err
+}
+
 // EphemeralIdentityKey is the viper key (and `otela start` flag) that makes a
-// node use EphemeralKey instead of the persisted key file.
+// node use EphemeralKey instead of the persisted key file. The hyphen keeps
+// OF_EPHEMERAL-IDENTITY out of reach of AutomaticEnv, so the env form is
+// bound explicitly as EphemeralIdentityEnv.
 const EphemeralIdentityKey = "ephemeral-identity"
+
+// EphemeralIdentityEnv is the environment variable that enables
+// EphemeralIdentityKey, e.g. for SLURM scripts that configure nodes via OF_*.
+const EphemeralIdentityEnv = "OF_EPHEMERAL_IDENTITY"
 
 var (
 	ephemeralKeyMu sync.Mutex
@@ -111,7 +125,7 @@ func EphemeralKey() (crypto.PrivKey, error) {
 	ephemeralKeyMu.Lock()
 	defer ephemeralKeyMu.Unlock()
 	if ephemeralKey == nil {
-		priv, _, err := crypto.GenerateKeyPairWithReader(crypto.RSA, 2048, rand.Reader)
+		priv, err := newKey(rand.Reader)
 		if err != nil {
 			return nil, err
 		}

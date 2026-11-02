@@ -30,3 +30,22 @@ func TestPeerIDCommand_PrintsPeerID(t *testing.T) {
 	assert.GreaterOrEqual(t, len(printed), 40)
 	assert.NotContains(t, printed, " ")
 }
+
+func TestPeerIDCommand_WarnsUnderEphemeralIdentity(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("config_dir", t.TempDir())
+	_, err := protocol.GenerateAndWriteKey()
+	assert.NoError(t, err)
+	viper.Set(protocol.EphemeralIdentityKey, true)
+
+	var out, errOut bytes.Buffer
+	peerIDCmd.SetOut(&out)
+	peerIDCmd.SetErr(&errOut)
+	t.Cleanup(func() { peerIDCmd.SetOut(nil); peerIDCmd.SetErr(nil) })
+	assert.NoError(t, peerIDCmd.RunE(peerIDCmd, nil))
+
+	// stdout stays a bare peer ID for scripts; the caveat goes to stderr.
+	assert.NotContains(t, out.String(), "warning")
+	assert.Contains(t, errOut.String(), protocol.EphemeralIdentityEnv)
+}
