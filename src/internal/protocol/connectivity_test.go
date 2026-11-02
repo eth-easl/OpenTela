@@ -2,6 +2,8 @@ package protocol
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -266,4 +268,87 @@ func TestPickAdvertisedRelay(t *testing.T) {
 	assert.Equal(t, y.String(), pickAdvertisedRelay(a, []peer.ID{x, y}))
 	assert.Equal(t, x.String(), pickAdvertisedRelay(a, []peer.ID{x}))
 	assert.Equal(t, "", pickAdvertisedRelay(a, nil))
+}
+
+// --- parallel reservations -------------------------------------------------
+
+func newHostConnectedTo(t *testing.T, n int) (host.Host, []peer.ID) {
+	t.Helper()
+	a, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = a.Close() })
+	var ids []peer.ID
+	for i := 0; i < n; i++ {
+		b, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = b.Close() })
+		require.NoError(t, a.Connect(context.Background(), peer.AddrInfo{ID: b.ID(), Addrs: b.Addrs()}))
+		ids = append(ids, b.ID())
+	}
+	return a, ids
+}
+
+func TestRelayCandidates_PrefersBootstrapAndRelayCapablePeers(t *testing.T) {
+	a, ids := newHostConnectedTo(t, 3)
+	boot, relay, worker := ids[0], ids[1], ids[2]
+
+	prevCache := bootstraps
+	bootstraps = &bootstrapCache{peers: map[peer.ID]peer.AddrInfo{boot: {ID: boot}}}
+	t.Cleanup(func() { bootstraps = prevCache })
+
+	got := relayCandidates(a, func(p peer.ID) bool { return p == relay })
+	assert.ElementsMatch(t, []peer.ID{boot, relay}, got)
+	assert.NotContains(t, got, worker)
+
+	// Nothing qualifies: fall back to every connected peer.
+	bootstraps = &bootstrapCache{}
+	got = relayCandidates(a, func(peer.ID) bool { return false })
+	assert.ElementsMatch(t, []peer.ID{boot, relay, worker}, got)
+}
+
+func TestReserveOnRelays_ParallelBoundedAndOrdered(t *testing.T) {
+	resetRelayReservations(t)
+	cands := make([]peer.ID, 20)
+	for i := range cands {
+		cands[i] = mustPeerID(t)
+	}
+	fail := map[peer.ID]bool{cands[3]: true, cands[11]: true}
+
+	var inFlight, peak atomic.Int32
+	reserve := func(ctx context.Context, _ host.Host, p peer.ID) (time.Time, error) {
+		n := inFlight.Add(1)
+		for {
+			old := peak.Load()
+			if n <= old || peak.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+		inFlight.Add(-1)
+		if fail[p] {
+			return time.Time{}, errors.New("no reservation")
+		}
+		return time.Now().Add(time.Hour), nil
+	}
+
+	start := time.Now()
+	got := reserveOnRelays(nil, cands, reserve)
+	elapsed := time.Since(start)
+
+	assert.LessOrEqual(t, int(peak.Load()), relayReserveParallelism, "concurrency must be bounded")
+	assert.Greater(t, int(peak.Load()), 1, "reservations must run in parallel")
+	assert.Less(t, elapsed, 20*50*time.Millisecond/2, "should be much faster than serial")
+
+	var want []peer.ID
+	for _, p := range cands {
+		if !fail[p] {
+			want = append(want, p)
+		}
+	}
+	assert.Equal(t, want, got, "successes are returned in candidate order")
+
+	relayReservations.mu.Lock()
+	defer relayReservations.mu.Unlock()
+	assert.Len(t, relayReservations.expires, len(want))
+	assert.NotContains(t, relayReservations.expires, cands[3])
 }
