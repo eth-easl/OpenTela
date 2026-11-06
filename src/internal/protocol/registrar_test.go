@@ -82,3 +82,26 @@ func TestLocalServiceSnapshot(t *testing.T) {
 		t.Fatalf("expected merged identity groups, got %v", snap[0].IdentityGroup)
 	}
 }
+
+func TestFetchLLMIdentityGroups(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"Kimi-K3.1-Pro"},{"id":"Kimi-K3.1-Pro-alias"}]}`))
+	}))
+	serverURL, err := url.Parse(server.URL)
+	assert.NoError(t, err)
+	_, port, err := net.SplitHostPort(serverURL.Host)
+	assert.NoError(t, err)
+
+	groups, err := fetchLLMIdentityGroups(port, 1, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"model=Kimi-K3.1-Pro", "model=Kimi-K3.1-Pro-alias"}, groups)
+
+	server.Close()
+	groups, err = fetchLLMIdentityGroups(port, 2, 0)
+	assert.Error(t, err)
+	assert.Nil(t, groups)
+}

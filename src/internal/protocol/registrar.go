@@ -157,33 +157,48 @@ func healthCheckRemote(port, healthPath string, maxTries int) error {
 	return fmt.Errorf("health check failed after %d attempts (%s elapsed)", maxTries, time.Since(start).Truncate(time.Second))
 }
 
-func registerLLMService(port string) {
-	// The service just passed its health check, but /v1/models can still fail
-	// transiently (e.g. the server finishing warm-up). Nothing re-fetches the
-	// model list later, so a blip here would permanently register this node
-	// without model identity groups — retry briefly, and be loud on final
-	// failure since model-based routing will not reach this node.
-	const modelFetchAttempts = 10
-	const modelFetchInterval = 3 * time.Second
-	var availableModels common.LMAvailableModels
-	for attempt := 1; ; attempt++ {
-		modelsBytes, err := common.RemoteGET("http://localhost:" + port + "/v1/models")
+// fetchLLMIdentityGroups reads the served model names from the LLM service's
+// /v1/models and returns them as "model=<id>" identity groups. It tries up to
+// attempts times, sleeping interval between tries, and returns the last error
+// if every attempt failed.
+func fetchLLMIdentityGroups(port string, attempts int, interval time.Duration) ([]string, error) {
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		var modelsBytes []byte
+		modelsBytes, err = common.RemoteGET("http://localhost:" + port + "/v1/models")
 		if err == nil {
 			common.Logger.Debug("Fetched models from LLM service: ", string(modelsBytes))
+			var availableModels common.LMAvailableModels
 			if err = json.Unmarshal(modelsBytes, &availableModels); err == nil {
-				break
+				var identityGroup []string
+				for _, model := range availableModels.Models {
+					identityGroup = append(identityGroup, "model="+model.Id)
+				}
+				return identityGroup, nil
 			}
 		}
-		if attempt == modelFetchAttempts {
-			common.Logger.Errorf("could not fetch models from LLM service after %d attempts, registering without model identity groups: %v", modelFetchAttempts, err)
-			break
+		if attempt < attempts {
+			common.Logger.Debugf("could not fetch models from LLM service (attempt %d/%d): %v", attempt, attempts, err)
+			time.Sleep(interval)
 		}
-		common.Logger.Debugf("could not fetch models from LLM service (attempt %d/%d): %v", attempt, modelFetchAttempts, err)
-		time.Sleep(modelFetchInterval)
 	}
-	var identityGroup []string
-	for _, model := range availableModels.Models {
-		identityGroup = append(identityGroup, "model="+model.Id)
+	return nil, err
+}
+
+// llmIdentityGroupsFetcher is fetchLLMIdentityGroups, swappable in tests.
+var llmIdentityGroupsFetcher = fetchLLMIdentityGroups
+
+func registerLLMService(port string) {
+	// The service just passed its health check, but /v1/models can still fail
+	// transiently (e.g. the server finishing warm-up). A blip here registers
+	// this node without model identity groups until the service is withdrawn
+	// and restored — retry briefly, and be loud on final failure since
+	// model-based routing will not reach this node.
+	const modelFetchAttempts = 10
+	const modelFetchInterval = 3 * time.Second
+	identityGroup, err := llmIdentityGroupsFetcher(port, modelFetchAttempts, modelFetchInterval)
+	if err != nil {
+		common.Logger.Errorf("could not fetch models from LLM service after %d attempts, registering without model identity groups: %v", modelFetchAttempts, err)
 	}
 
 	// register the models

@@ -131,6 +131,62 @@ func setServiceWithdrawn(key string, withdrawn bool) {
 	delete(withdrawnServices, key)
 }
 
+// localServiceIdentityGroups returns a copy of the identity groups of the local
+// service with the given key, or nil if it is not registered.
+func localServiceIdentityGroups(key string) []string {
+	for _, s := range snapshotLocalServices() {
+		if serviceKey(s) == key {
+			return append([]string(nil), s.IdentityGroup...)
+		}
+	}
+	return nil
+}
+
+// restoredService builds the advertisement for a service that turned healthy
+// again after a withdrawal.
+//
+// An llm service's identity groups are not in the configuration: at startup
+// registerLLMService reads them from /v1/models ("model=<id>"), and model-based
+// routing only reaches a worker that carries them. Restoring with the
+// configured groups alone brings the worker back ready but unroutable, and
+// nothing repairs it short of a restart. So the model list is read again; it
+// just passed a health check, so one attempt is enough. If that read fails, the
+// groups the service had when it was withdrawn are used instead.
+func restoredService(name, port string, configured, previous []string) Service {
+	groups := append([]string(nil), configured...)
+	if name == "llm" {
+		fetched, err := llmIdentityGroupsFetcher(port, 1, 0)
+		if err != nil || len(fetched) == 0 {
+			common.Logger.Warnf("Service %s: could not re-read models on restore (%v); re-advertising with its previous identity groups", name, err)
+			fetched = previous
+		}
+		groups = mergeIdentityGroups(groups, fetched)
+	}
+	return Service{
+		Name:          name,
+		Host:          "localhost",
+		Port:          port,
+		Status:        CONNECTED,
+		IdentityGroup: groups,
+	}
+}
+
+// mergeIdentityGroups appends the groups in extra that base lacks, keeping order.
+func mergeIdentityGroups(base, extra []string) []string {
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	out := make([]string, 0, len(base)+len(extra))
+	for _, list := range [][]string{base, extra} {
+		for _, g := range list {
+			if _, ok := seen[g]; ok {
+				continue
+			}
+			seen[g] = struct{}{}
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
 func serviceHealthInterval() time.Duration {
 	if d := viper.GetDuration("service.health_interval"); d > 0 {
 		return d
@@ -166,6 +222,9 @@ func StartServiceHealthRevalidation() {
 	go func() {
 		state := &serviceHealthState{}
 		key := serviceKey(Service{Name: serviceName, Host: "localhost", Port: servicePort})
+		// Identity groups the service carried when it was withdrawn; the
+		// fallback if they cannot be read again on restore.
+		var withdrawnGroups []string
 
 		for {
 			time.Sleep(interval)
@@ -179,19 +238,15 @@ func StartServiceHealthRevalidation() {
 			case serviceHealthWithdraw:
 				common.Logger.Warnf("Service %s failed %d consecutive health checks; withdrawing advertisement",
 					serviceName, threshold)
+				withdrawnGroups = localServiceIdentityGroups(key)
 				setServiceWithdrawn(key, true)
 				removeLocalService(key)
 				ReannounceLocalServices()
 			case serviceHealthRestore:
 				common.Logger.Infof("Service %s healthy again; re-advertising", serviceName)
 				setServiceWithdrawn(key, false)
-				addLocalService(Service{
-					Name:          serviceName,
-					Host:          "localhost",
-					Port:          servicePort,
-					Status:        CONNECTED,
-					IdentityGroup: viper.GetStringSlice("service.identity_group"),
-				})
+				addLocalService(restoredService(serviceName, servicePort,
+					viper.GetStringSlice("service.identity_group"), withdrawnGroups))
 				ReannounceLocalServices()
 			case serviceHealthNoop:
 			}
