@@ -105,3 +105,14 @@ func TestFetchLLMIdentityGroups(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, groups)
 }
+
+// During warm-up a backend can answer 200 with no models. That must be retried
+// like any other failed read, not taken as a final answer.
+func TestFetchLLMIdentityGroups_EmptyListIsAnError(t *testing.T) {
+	f := newFakeLLM(t)
+
+	groups, err := fetchLLMIdentityGroups(f.port, 3, 0)
+	assert.Error(t, err)
+	assert.Nil(t, groups)
+	assert.EqualValues(t, 3, f.modelHits.Load())
+}
