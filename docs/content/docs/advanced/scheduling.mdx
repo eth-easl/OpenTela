@@ -33,7 +33,9 @@ When a client sends a request to a head node at `/v1/service/:service/*path`, th
 2. **Candidate selection + identity-group matching.** `selectCandidates` collects every connected provider for the service, then matches on the request's *identity group* (e.g. `model=Qwen/Qwen3-8B`). Matching is three-tier with fallback controlled by the `X-Otela-Fallback` header: exact (`model=Qwen/Qwen3-8B`) → wildcard (`model=*`) → catch-all (`all`). Default (`0`) is exact-only; `1` allows wildcard; `2` allows catch-all.
 3. **Trust filtering.** If the client sends `X-Otela-Trust: N`, candidates below trust level `N` are removed (see [Security → Trust-aware routing](/docs/advanced/security)). If none qualify, the head returns `503` rather than silently falling back.
 4. **Admission control.** If `scalability.admission_control` is enabled, the head probabilistically sheds load when the number of available workers is below `scalability.expected_workers`, returning `503` with `Retry-After: 5`.
-5. **Retry loop + policy selection.** For each attempt, peers already tried are excluded, then **one peer is chosen from the remaining candidates**:
+5. **Retry loop + policy selection.** For each attempt, peers already tried are excluded, then **one peer is chosen from the remaining candidates**, in this order (first match wins):
+   - if `affinity.enabled` (default `true`) and the request carries an `X-Session-Affinity` key whose pinned peer is still a candidate → that pinned peer (see [Session affinity](/docs/tutorial/routing#session-affinity-sticky-peers-for-kv-cache-warmth));
+   - if price-aware routing is active (`routing.price_weight_decay` in `(0,1)` and the billing gate supplied `X-Otela-Allowed-Peers`) → on the first attempt, price-rank-weighted random selection; on retries, the next-cheapest remaining peer (see [Settlement](/docs/tutorial/settlement));
    - if `scalability.weighted_routing` is enabled → weighted random selection (`scoreCandidates` → `weightedRandomSelect`);
    - otherwise → **the configured load-balancing policy** (`lb.Pick(remaining)`).
 
@@ -174,7 +176,7 @@ make build
 
 `Pick` only sees peer IDs. If your policy needs to know a worker's GPU type, in-flight load, or trust level, that data lives in the distributed node table — look the peer up with `protocol.GetPeerFromTable(id)`, which returns a `Peer` carrying `Hardware`, `TrustLevel`, `Service`, and attestation fields.
 
-For score-based selection specifically, the **weighted routing** path is the intended extension point: `scoreCandidates` currently returns a uniform weight of `1.0` for every peer, and `weightedRandomSelect` already turns weights into a proportional choice. Replace the body of `scoreCandidates` with your scoring (e.g. weight by free GPU memory or inverse of recent latency), then enable `scalability.weighted_routing`.
+For score-based selection specifically, the **weighted routing** path is the intended extension point: `scoreCandidates` currently returns a uniform weight of `1.0` for every peer, and `weightedRandomSelect` already turns weights into a proportional choice. Replace the body of `scoreCandidates` with your scoring (e.g. weight by free GPU memory or inverse of recent latency), then enable `scalability.weighted_routing`. Note that affinity pins and price-aware routing are checked first (see the routing pipeline above), so a custom score only applies to requests that neither of them handles.
 
 ### Integrating a policy from the literature
 
